@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc-handler"
-version = "0.5.0"
+version = "0.5.1"
 description = "Local-LLM document tagger + sorter: classify academic docs by stream/subject and move by filename prefix, fully offline."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -31,7 +31,7 @@ Issues = "https://github.com/Naivedya-sahu/doc-handler/issues"
 doc-handler = "doc_handler:main"
 
 [tool.setuptools]
-py-modules = ["doc_handler"]
+py-modules = ["doc_handler", "config", "tui"]
 license-files = ["LICENSE"]
 
 [tool.setuptools.data-files]

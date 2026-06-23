@@ -88,6 +88,24 @@ def _http(url,payload,headers):
     req=urllib.request.Request(url,data=json.dumps(payload).encode(),headers=headers)
     return json.load(urllib.request.urlopen(req,timeout=180))
 
+def available_models(api):
+    try:
+        r=json.load(urllib.request.urlopen(api.replace("/chat/completions","/models"),timeout=8))
+        return [m.get("id") for m in r.get("data",[])]
+    except Exception: return []
+
+def resolve_model(api,want,prefer_vision=False):
+    """If 'want' isn't loaded on the server, fall back to a loaded model (vision-preferring).
+    Returns (model_id, server_reachable)."""
+    av=available_models(api)
+    if not av: return want, False
+    if want in av: return want, True
+    pick=None
+    if prefer_vision:
+        pick=next((m for m in av if ("vl" in m.lower() or "vision" in m.lower())),None)
+    pick=pick or next((m for m in av if "embed" not in m.lower()), av[0])
+    return pick, True
+
 def llm(a,backend,system,user_text,image_png=None):
     """Return raw model text. backend: local | openai | claude."""
     if backend in ("local","openai"):
@@ -210,6 +228,13 @@ def main():
     global MIN_TEXT,DEEP_PAGES,DEEP_CAP,DPI
     MIN_TEXT,DEEP_PAGES,DEEP_CAP,DPI=glb["MIN_TEXT"],glb["DEEP_PAGES"],glb["DEEP_CAP"],glb["DPI"]
     if a.host: a.api=resolve_api(cfg,a.host)
+    if a.backend=="local":                       # adapt to whatever model is loaded
+        m,up=resolve_model(a.api,a.model)
+        if not up: print(f"[warn] model server unreachable at {a.api}")
+        elif m!=a.model: print(f"[model] '{a.model}' not loaded -> '{m}'"); a.model=m
+        if a.vision:
+            vm,up=resolve_model(a.api,a.vision_model,prefer_vision=True)
+            if up and vm!=a.vision_model: print(f"[vision] '{a.vision_model}' not loaded -> '{vm}'"); a.vision_model=vm
     root=resolve_location(cfg,a.location) if a.location else a.root
     if not root: ap.error("give a ROOT path or --location NAME (see config 'locations')")
     a.root=root

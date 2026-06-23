@@ -2,6 +2,17 @@
 
 All notable changes. Newest on top.
 
+## [0.5.1] — 2026-06-23
+### Added
+- **Model auto-resolve**: if the configured model id isn't loaded on the server, fall back to a
+  loaded one (vision-preferring) instead of failing — handles "models may change" and remote hosts.
+### Fixed
+- **Packaging**: `config` and `tui` were missing from `py-modules`, so `pip install` left imports
+  broken. Now all three modules install; `doc-handler` console entry verified.
+### Tested
+- Remote-host config (`HOME` → `http://HOME:1234/...`) URL resolution, auto-resolve fallback,
+  `pip install .` + console entry + imports — all verified.
+
 ## [0.5.0] — 2026-06-23
 ### Added
 - **`config.py` + `config.json`** central config (model endpoints, named **hosts**, named
