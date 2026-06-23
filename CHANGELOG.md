@@ -2,6 +2,18 @@
 
 All notable changes. Newest on top.
 
+## [0.7.1] — 2026-06-23
+### Fixed
+- **Frontier `claude` (subscription, no API key) now actually works.** Three bugs:
+  (1) `shell=True` + list arg mangled the multiline prompt on Windows → removed shell;
+  (2) ran inside the repo so Claude Code read project files / global CLAUDE.md → now runs
+  from a neutral cwd with a directive one-shot prompt; (3) default model needed paid 1M-context
+  credits → pin `--model haiku` (standard-context, sub-covered). Verified: returns a clean
+  `STREAM SUBJECT TYPE CONF [PROPOSE:LABEL]` and discovered `PROPOSE:THERMO` live.
+### Added
+- Generic **`--frontier cmd`** + `--frontier-cmd "<template>"` (prompt piped via stdin) to wire
+  ANY local/subscription CLI without an API key. `--frontier-model` (default `haiku`).
+
 ## [0.7.0] — 2026-06-23
 ### Added
 - **`.doc` (old binary Word) reader** via a reused Word COM instance (Windows + Word + `pywin32`).

@@ -153,14 +153,25 @@ def llm(a,backend,system,user_text,image_png=None):
             return r["choices"][0]["message"]["content"]
         except Exception as e:
             return ""   # -> decide() -> 99UNS; one bad call never kills the run
-    if backend=="claude":   # Claude Code CLI — uses the Claude subscription, text only
-        prompt=system+"\n\n"+user_text+"\nReply with ONLY the 4-5 tokens."
-        exe=shutil.which("claude") or shutil.which("claude.cmd") or "claude"
+    if backend in ("claude","cmd"):   # subscription CLIs — NO API key. Text only.
+        import tempfile
+        oneshot=(system+"\n\n"+user_text+
+                 "\n\nRespond with ONLY one line: STREAM SUBJECT TYPE CONF. "
+                 "No explanation, no markdown, no questions.")
+        neutral=tempfile.gettempdir()   # run outside the repo so the CLI doesn't read project files
         try:
-            out=subprocess.run([exe,"-p",prompt],capture_output=True,text=True,
-                               timeout=120,shell=(os.name=="nt"))
+            if backend=="claude":       # Claude Code CLI -> Claude subscription
+                exe=shutil.which("claude") or "claude"
+                fm=getattr(a,"frontier_model","") or "haiku"   # standard-context, sub-covered
+                out=subprocess.run([exe,"-p","--model",fm,oneshot],capture_output=True,text=True,
+                                   timeout=180,cwd=neutral)   # resolved .exe -> no shell (shell+list mangles on Win)
+                return out.stdout
+            tmpl=getattr(a,"frontier_cmd","") or ""   # cmd: templated CLI from config, prompt via stdin
+            if not tmpl: return ""
+            out=subprocess.run(tmpl,input=oneshot,capture_output=True,text=True,
+                               timeout=180,shell=True,cwd=neutral)
             return out.stdout
-        except Exception as e: return "99UNS "+str(e)[:20]
+        except Exception: return ""
     return ""
 
 def parse(out):
@@ -284,7 +295,9 @@ def add_args(ap):
     ap.add_argument("--vision",action="store_true",default=None)
     ap.add_argument("--vision-model",default=None)
     ap.add_argument("--backend",default=None,choices=["local","openai"])
-    ap.add_argument("--frontier",default=None,choices=["none","claude","openai"])
+    ap.add_argument("--frontier",default=None,choices=["none","claude","openai","cmd"])
+    ap.add_argument("--frontier-model",default="haiku",help="Claude Code model for --frontier claude (standard-context, sub-covered)")
+    ap.add_argument("--frontier-cmd",dest="frontier_cmd",default=None,help="--frontier cmd: shell template; prompt piped via stdin")
     ap.add_argument("--openai-model",default=None)
     ap.add_argument("--tags",default=os.path.join(HERE,"TAGS.md"))
     ap.add_argument("--prompt",default=os.path.join(HERE,"system_prompt.md"))

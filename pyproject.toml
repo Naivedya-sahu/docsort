@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc-handler"
-version = "0.7.0"
+version = "0.7.1"
 description = "Local-LLM document tagger + sorter: classify academic docs by stream/subject and move by filename prefix, fully offline."
 readme = "README.md"
 license = { file = "LICENSE" }
