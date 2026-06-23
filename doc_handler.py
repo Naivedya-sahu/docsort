@@ -15,8 +15,15 @@ Backends: --backend local|openai (main) ; --frontier none|claude|openai (99UNS f
 Deps: see requirements.txt.
 """
 from __future__ import annotations
-import os, sys, json, csv, re, base64, argparse, subprocess, urllib.request
+import os, sys, json, csv, re, base64, argparse, subprocess, shutil, urllib.request
 from config import load_config, resolve_api, resolve_location, arg_defaults
+
+def unique_path(p):
+    """Avoid overwriting: foo.pdf -> foo__1.pdf if taken."""
+    if not os.path.exists(p): return p
+    base,ext=os.path.splitext(p); i=1
+    while os.path.exists(f"{base}__{i}{ext}"): i+=1
+    return f"{base}__{i}{ext}"
 
 HERE=os.path.dirname(os.path.abspath(__file__))
 EXT_TEXT={".pdf",".txt",".md",".docx",".pptx",".ppt",".doc"}
@@ -115,17 +122,19 @@ def llm(a,backend,system,user_text,image_png=None):
         else:
             content=user_text
         msgs=[{"role":"system","content":system},{"role":"user","content":content}]
-        if backend=="local":
-            model=a.vision_model if image_png else a.model
-            r=_http(a.api,{"model":model,"temperature":0,"max_tokens":16,"messages":msgs},
-                    {"Content-Type":"application/json"})
-        else:
-            key=os.environ.get("OPENAI_API_KEY","")
-            model=a.openai_model
-            r=_http("https://api.openai.com/v1/chat/completions",
-                    {"model":model,"temperature":0,"max_tokens":16,"messages":msgs},
-                    {"Content-Type":"application/json","Authorization":"Bearer "+key})
-        return r["choices"][0]["message"]["content"]
+        try:
+            if backend=="local":
+                model=a.vision_model if image_png else a.model
+                r=_http(a.api,{"model":model,"temperature":0,"max_tokens":24,"messages":msgs},
+                        {"Content-Type":"application/json"})
+            else:
+                key=os.environ.get("OPENAI_API_KEY","")
+                r=_http("https://api.openai.com/v1/chat/completions",
+                        {"model":a.openai_model,"temperature":0,"max_tokens":24,"messages":msgs},
+                        {"Content-Type":"application/json","Authorization":"Bearer "+key})
+            return r["choices"][0]["message"]["content"]
+        except Exception as e:
+            return ""   # -> decide() -> 99UNS; one bad call never kills the run
     if backend=="claude":   # Claude Code CLI — uses the Claude subscription, text only
         prompt=system+"\n\n"+user_text+"\nReply with ONLY the 4 tokens."
         try:
@@ -137,9 +146,17 @@ def llm(a,backend,system,user_text,image_png=None):
 def parse(out):
     o=(out or "").upper()
     st=next((s for s in sorted(STREAMS,key=len,reverse=True) if re.search(r'\b'+re.escape(s)+r'\b',o)),"CW")
-    su=next((c for c in sorted(SUBJECTS,key=len,reverse=True) if c in o),"99UNS")
-    ty=next((t for t in TYPES if t.upper() in o),"misc")
+    su=next((c for c in sorted(SUBJECTS,key=len,reverse=True) if re.search(r'\b'+re.escape(c)+r'\b',o)),"99UNS")
+    ty=next((t for t in TYPES if re.search(r'\b'+re.escape(t.upper())+r'\b',o)),"misc")
     cf="high" if "HIGH" in o else "low"
+    m=re.search(r'PROPOSE[:\s]+([A-Z][A-Z0-9_]{1,11})',o)
+    prop=m.group(1) if m else ""
+    return st,su,ty,cf,prop
+
+def decide(out):
+    """parse + fold a model proposal into a ~LABEL subject (review symbol)."""
+    st,su,ty,cf,prop=parse(out)
+    if prop and su=="99UNS": su="~"+prop
     return st,su,ty,cf
 
 def classify(a,sysp,full,fn,rel):
@@ -147,26 +164,26 @@ def classify(a,sysp,full,fn,rel):
     snip=doc_text(full)
     u=lambda txt:f"Filename: {fn}\nFolder: {rel}\nText:\n{txt[:DEEP_CAP]}\n\nAnswer (STREAM SUBJECT TYPE CONF):"
     if len(snip.strip())>=MIN_TEXT:
-        st,su,ty,cf=parse(llm(a,a.backend,sysp,u(snip))); src="text"
+        st,su,ty,cf=decide(llm(a,a.backend,sysp,u(snip))); src="text"
         if su=="99UNS" and ispdf:
             deep=pdf_text(full,DEEP_PAGES,DEEP_CAP)
             if len(deep)>len(snip):
-                r=parse(llm(a,a.backend,sysp,u(deep)))
+                r=decide(llm(a,a.backend,sysp,u(deep)))
                 if r[1]!="99UNS": st,su,ty,cf,src=(*r,"text5"); snip=deep
         if su=="99UNS" and a.frontier!="none":
-            r=parse(llm(a,a.frontier,sysp,u(snip)))
+            r=decide(llm(a,a.frontier,sysp,u(snip)))
             if r[1]!="99UNS": return (*r,"frontier:"+a.frontier)
         return st,su,ty,cf,src
     if a.vision and ispdf and (png:=page_png(full,0)):
         un="(handwritten/scanned page) Answer (STREAM SUBJECT TYPE CONF):"
-        st,su,ty,cf=parse(llm(a,a.backend,sysp,f"Filename: {fn}\nFolder: {rel}\n"+un,png)); src="vision"
+        st,su,ty,cf=decide(llm(a,a.backend,sysp,f"Filename: {fn}\nFolder: {rel}\n"+un,png)); src="vision"
         if su=="99UNS" and (p3:=page_png(full,2)):
-            r=parse(llm(a,a.backend,sysp,f"Filename: {fn}\nFolder: {rel}\n(page 3) "+un,p3))
+            r=decide(llm(a,a.backend,sysp,f"Filename: {fn}\nFolder: {rel}\n(page 3) "+un,p3))
             if r[1]!="99UNS": return (*r,"vision3")
         return st,su,ty,cf,src
-    r=parse(llm(a,a.backend,sysp,u("")))
+    r=decide(llm(a,a.backend,sysp,u("")))
     if r[1]=="99UNS" and a.frontier!="none":
-        rf=parse(llm(a,a.frontier,sysp,u("")))
+        rf=decide(llm(a,a.frontier,sysp,u("")))
         if rf[1]!="99UNS": return (*rf,"frontier:"+a.frontier)
     return (*r,"filename")
 
@@ -176,12 +193,14 @@ def move_by_prefix(root,dest,apply):
         for fn in fns:
             m=pat.match(fn)
             if not m: continue
-            newp=os.path.join(dest,m.group(1),m.group(2),m.group(3))
-            rows.append((os.path.join(dp,fn),newp)); n+=1
+            src=os.path.join(dp,fn); tgt=os.path.join(dest,m.group(1),m.group(2))
+            newp=os.path.join(tgt,m.group(3))
             if apply:
-                os.makedirs(os.path.join(dest,m.group(1),m.group(2)),exist_ok=True)
-                try: os.rename(os.path.join(dp,fn),newp)
+                os.makedirs(tgt,exist_ok=True)
+                newp=unique_path(newp)                       # never overwrite
+                try: shutil.move(src,newp)                   # cross-device safe
                 except Exception as e: print("move-fail:",fn,e)
+            rows.append((src,newp)); n+=1
     log=os.path.join(dest if apply else root,"_move_log.csv")
     try:
         os.makedirs(os.path.dirname(log),exist_ok=True)
@@ -195,6 +214,29 @@ def iter_targets(root):
         for fn in fns:
             if os.path.splitext(fn)[1].lower() in EXT_TEXT and not fn.startswith("["):
                 yield dp,fn
+
+def review(root, log=None):
+    """Aggregate a run log into TAG-REVIEW.md: distribution, proposed (~) tags, low-conf. No model needed."""
+    import collections
+    logp=log or os.path.join(root,"_doc_handler_log.csv")
+    if not os.path.isfile(logp): print("no log at",logp); return
+    rows=list(csv.DictReader(open(logp,encoding="utf-8")))
+    combo=collections.Counter(f"{r['stream']}-{r['subject']}" for r in rows)
+    props=collections.Counter(r['subject'] for r in rows if r['subject'].startswith('~'))
+    low=[r for r in rows if r['conf']=='low']
+    out=["# TAG REVIEW","",f"{len(rows)} files · {len(props)} proposed tag(s) · {len(low)} low-confidence.","",
+         "## Distribution (stream-subject)"]
+    for k,n in combo.most_common(): out.append(f"- `{k}` x {n}")
+    out.append("\n## (review) Proposed tags -> promote to TAGS.md")
+    if props:
+        for lab,n in props.most_common():
+            out.append(f"- `{lab}` x {n}  -> if recurring, add a SUBJECT code for `{lab[1:]}` in TAGS.md, then re-run")
+    else: out.append("- none")
+    out.append("\n## Low-confidence (eyeball)")
+    for r in low[:50]: out.append(f"- {r['stream']}-{r['subject']} · {r['source']} · {r['old']}")
+    p=os.path.join(root,"TAG-REVIEW.md"); open(p,"w",encoding="utf-8").write("\n".join(out))
+    print(f"review -> {p}")
+    print(f"proposals: {dict(props) or 'none'} | low-conf: {len(low)} | groups: {len(combo)}")
 
 def setup(a):
     global STREAMS,SUBJECTS,TYPES
@@ -217,6 +259,7 @@ def add_args(ap):
     ap.add_argument("--prompt",default=os.path.join(HERE,"system_prompt.md"))
     ap.add_argument("--apply",action="store_true",default=None)
     ap.add_argument("--move",default=None,help="destination root; or @archive to use config archive_root")
+    ap.add_argument("--review",action="store_true",help="aggregate the run log into TAG-REVIEW.md (offline)")
     ap.add_argument("--log",default=None)
 
 def main():
@@ -227,19 +270,23 @@ def main():
     a=ap.parse_args()
     global MIN_TEXT,DEEP_PAGES,DEEP_CAP,DPI
     MIN_TEXT,DEEP_PAGES,DEEP_CAP,DPI=glb["MIN_TEXT"],glb["DEEP_PAGES"],glb["DEEP_CAP"],glb["DPI"]
-    if a.host: a.api=resolve_api(cfg,a.host)
-    if a.backend=="local":                       # adapt to whatever model is loaded
-        m,up=resolve_model(a.api,a.model)
-        if not up: print(f"[warn] model server unreachable at {a.api}")
-        elif m!=a.model: print(f"[model] '{a.model}' not loaded -> '{m}'"); a.model=m
-        if a.vision:
-            vm,up=resolve_model(a.api,a.vision_model,prefer_vision=True)
-            if up and vm!=a.vision_model: print(f"[vision] '{a.vision_model}' not loaded -> '{vm}'"); a.vision_model=vm
     root=resolve_location(cfg,a.location) if a.location else a.root
     if not root: ap.error("give a ROOT path or --location NAME (see config 'locations')")
     a.root=root
-    dest=cfg.get("archive_root") if a.move=="@archive" else a.move
+    if a.review: setup(a); review(a.root,a.log); return     # offline; no model server needed
+    if a.move=="@archive":
+        dest=cfg.get("archive_root")
+        if not dest: ap.error("--move @archive but config 'archive_root' is empty")
+    else: dest=a.move
     if dest: move_by_prefix(a.root,dest,bool(a.apply)); return
+    if a.host: a.api=resolve_api(cfg,a.host)
+    if a.backend=="local":                       # adapt to whatever model is loaded
+        m,up=resolve_model(a.api,a.model)
+        if not up: ap.error(f"model server unreachable at {a.api} — start LM Studio or fix --host (see TROUBLESHOOTING.md)")
+        if m!=a.model: print(f"[model] '{a.model}' not loaded -> '{m}'"); a.model=m
+        if a.vision:
+            vm,up=resolve_model(a.api,a.vision_model,prefer_vision=True)
+            if up and vm!=a.vision_model: print(f"[vision] '{a.vision_model}' not loaded -> '{vm}'"); a.vision_model=vm
     sysp=setup(a); rows=[]; n=0
     for dp,fn in iter_targets(a.root):
         full=os.path.join(dp,fn); rel=os.path.relpath(dp,a.root)
@@ -247,7 +294,7 @@ def main():
         new=f"[{st}-{su}] {fn}"; rows.append((full,fn,new,st,su,ty,cf,src)); n+=1
         print(f"{st:5}{su:7}{ty:10}{cf:5}{src:14}{fn[:46]}")
         if a.apply:
-            try: os.rename(full,os.path.join(dp,new))
+            try: os.rename(full,unique_path(os.path.join(dp,new)))
             except Exception as e: print("  rename-fail:",e)
     logp=a.log or os.path.join(a.root,"_doc_handler_log.csv")
     with open(logp,"w",encoding="utf-8",newline="") as g:

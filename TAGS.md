@@ -30,10 +30,21 @@ REF   general reference — textbooks, standards, datasheets not tied to one cou
 11COMM Communications / Networks — modulation, digital comm, info theory, antenna, radar
 12EMAG Electromagnetics — maxwell, transmission line, waveguide, fields, smith chart
 13TOOLS Programming / CAD / Tools — C/C++/python/matlab, kicad, simulation, lab software
-90HUM  Humanities / Management / General — english, constitution, behaviour, management
+90HUM  Humanities / Management / General — english, constitution, behaviour, management, ethics
+91PHY  Physics (engineering/applied physics) — mechanics, optics, waves, modern physics, materials
+92CHEM Chemistry (engineering chemistry) — bonding, electrochem, polymers, corrosion
 NA     no single subject (use for PROJ/RES/REC/REF)
 99UNS  unsure / multi-subject
 ```
+> **Foundation/Common subjects** (not core-EE): `00MM` `90HUM` `91PHY` `92CHEM`.
+> Add new ones here as they recur (see PROPOSALS below).
+
+## PROPOSALS — how the taglist evolves
+When the model meets a clear, recurring subject that is NOT in the list, it answers
+`99UNS` plus a 5th token `PROPOSE:<LABEL>`. The script writes the file as
+`[STREAM-~LABEL] name` — the **`~` is the review symbol** (these are NOT auto-moved).
+Run `--review` to tally proposals; if a `~LABEL` shows up many times, promote it to a
+real SUBJECT code here, then re-run. Example: many `~PHY` → added `91PHY` above.
 
 ## TYPES
 ```tags

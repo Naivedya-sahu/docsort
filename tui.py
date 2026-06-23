@@ -41,7 +41,7 @@ def defaults(root, config=None, **kw):
     a.__dict__.update(kw); return a
 
 def bars(counts, total):
-    t=Table.box=None; tb=Table(show_header=True, header_style="bold magenta", expand=True)
+    tb=Table(show_header=True, header_style="bold magenta", expand=True)
     tb.add_column("subject"); tb.add_column("n", justify="right"); tb.add_column("", ratio=1)
     for code,n in counts.most_common():
         w=int(28*n/max(total,1)); tb.add_row(code, str(n), "[green]"+"█"*w+"[/]")

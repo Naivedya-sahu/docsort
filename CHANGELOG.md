@@ -2,6 +2,26 @@
 
 All notable changes. Newest on top.
 
+## [0.6.0] — 2026-06-23
+### Added
+- **Foundation subjects** `91PHY` (physics), `92CHEM` (chemistry) — physics no longer forced into EE codes.
+- **Tag evolution / proposals**: model can answer `99UNS PROPOSE:<LABEL>`; the file is written
+  `[STREAM-~LABEL]` (the `~` = review symbol, not auto-moved). `--review` tallies them into
+  `TAG-REVIEW.md` so recurring proposals can be promoted into `TAGS.md`.
+- **`--review`** offline aggregator: distribution, proposed tags, low-confidence list.
+- Prompt tuning: decide from real content; syllabus/scheme → `REF 99UNS`; prefer `99UNS` over a
+  low-confidence guess; physics→91PHY / chem→92CHEM.
+### Fixed (from an edge-case audit)
+- **Tag matching used substrings** → `NA` matched inside "FINAL", `lab` inside "syllabus"
+  (mislabeled types). Now word-boundary matched.
+- **Move could overwrite same-named files (data loss)** and **failed cross-device** (archive on
+  another drive). Now `shutil.move` + `unique_path` (never overwrite).
+- Tagging rename now collision-safe (`unique_path`).
+- **A single LLM HTTP error crashed the whole run** → now caught, that file → 99UNS.
+- **Unreachable model server hung 180s/file** → now aborts with a clear message.
+- `--move @archive` with empty `archive_root` now errors instead of moving into CWD.
+- TUI `Table.box=None` mutated rich globally; removed. `max_tokens` 16→24 for 5-token answers.
+
 ## [0.5.1] — 2026-06-23
 ### Added
 - **Model auto-resolve**: if the configured model id isn't loaded on the server, fall back to a
