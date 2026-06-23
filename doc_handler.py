@@ -69,11 +69,29 @@ def pdf_text(path,pages=2,cap=2000):
             if len(t)>cap: break
         d.close(); return t[:cap]
     except Exception: return ""
+_WORD=None
+def _doc_legacy(path):
+    """Read old binary .doc via a reused Word COM instance (Windows + Word + pywin32)."""
+    global _WORD
+    try:
+        if _WORD is None:
+            import win32com.client as wc
+            _WORD=wc.Dispatch("Word.Application"); _WORD.Visible=False
+        d=_WORD.Documents.Open(os.path.abspath(path), ReadOnly=True, AddToRecentFiles=False)
+        t=d.Content.Text; d.Close(False); return t
+    except Exception: return ""   # no Word/pywin32 -> falls back to filename tier
+def _word_quit():
+    global _WORD
+    try:
+        if _WORD is not None: _WORD.Quit(); _WORD=None
+    except Exception: pass
+
 def doc_text(path,cap=2000):
     e=os.path.splitext(path)[1].lower()
     try:
         if e==".pdf": return pdf_text(path,2,cap)
         if e in (".txt",".md"): return open(path,encoding="utf-8",errors="replace").read()[:cap]
+        if e==".doc": return _doc_legacy(path)[:cap]
         if e==".docx":
             import docx; return "\n".join(p.text for p in docx.Document(path).paragraphs)[:cap]
         if e==".pptx":
@@ -136,9 +154,11 @@ def llm(a,backend,system,user_text,image_png=None):
         except Exception as e:
             return ""   # -> decide() -> 99UNS; one bad call never kills the run
     if backend=="claude":   # Claude Code CLI — uses the Claude subscription, text only
-        prompt=system+"\n\n"+user_text+"\nReply with ONLY the 4 tokens."
+        prompt=system+"\n\n"+user_text+"\nReply with ONLY the 4-5 tokens."
+        exe=shutil.which("claude") or shutil.which("claude.cmd") or "claude"
         try:
-            out=subprocess.run(["claude","-p",prompt],capture_output=True,text=True,timeout=120)
+            out=subprocess.run([exe,"-p",prompt],capture_output=True,text=True,
+                               timeout=120,shell=(os.name=="nt"))
             return out.stdout
         except Exception as e: return "99UNS "+str(e)[:20]
     return ""
@@ -209,11 +229,22 @@ def move_by_prefix(root,dest,apply):
     print(f"{'MOVED' if apply else 'DRY-RUN move'}: {n} files -> {dest}")
     return n
 
+SKIP_NAMES={"tag-review.md","readme.md","changelog.md","guide.md","troubleshooting.md","tags.md"}
 def iter_targets(root):
     for dp,_,fns in os.walk(root):
         for fn in fns:
+            if fn.lower() in SKIP_NAMES or fn.startswith(("_doc_handler","_move")): continue
             if os.path.splitext(fn)[1].lower() in EXT_TEXT and not fn.startswith("["):
-                yield dp,fn
+                yield dp,fn,fn                       # (dir, current name, base name)
+
+_TAGPFX=re.compile(r'^\[[^\]]+\]\s+(.*)$')
+def iter_tagged(root):
+    """Already-prefixed docs, for --retag. Yields (dir, current name, stripped base)."""
+    for dp,_,fns in os.walk(root):
+        for fn in fns:
+            m=_TAGPFX.match(fn)
+            if m and os.path.splitext(m.group(1))[1].lower() in EXT_TEXT:
+                yield dp,fn,m.group(1)
 
 def review(root, log=None):
     """Aggregate a run log into TAG-REVIEW.md: distribution, proposed (~) tags, low-conf. No model needed."""
@@ -260,6 +291,7 @@ def add_args(ap):
     ap.add_argument("--apply",action="store_true",default=None)
     ap.add_argument("--move",default=None,help="destination root; or @archive to use config archive_root")
     ap.add_argument("--review",action="store_true",help="aggregate the run log into TAG-REVIEW.md (offline)")
+    ap.add_argument("--retag",action="store_true",help="re-classify already-prefixed files (after tuning/promoting a proposal)")
     ap.add_argument("--log",default=None)
 
 def main():
@@ -288,14 +320,16 @@ def main():
             vm,up=resolve_model(a.api,a.vision_model,prefer_vision=True)
             if up and vm!=a.vision_model: print(f"[vision] '{a.vision_model}' not loaded -> '{vm}'"); a.vision_model=vm
     sysp=setup(a); rows=[]; n=0
-    for dp,fn in iter_targets(a.root):
+    items=iter_tagged(a.root) if a.retag else iter_targets(a.root)
+    for dp,fn,base in items:
         full=os.path.join(dp,fn); rel=os.path.relpath(dp,a.root)
-        st,su,ty,cf,src=classify(a,sysp,full,fn,rel)
-        new=f"[{st}-{su}] {fn}"; rows.append((full,fn,new,st,su,ty,cf,src)); n+=1
-        print(f"{st:5}{su:7}{ty:10}{cf:5}{src:14}{fn[:46]}")
-        if a.apply:
+        st,su,ty,cf,src=classify(a,sysp,full,base,rel)
+        new=f"[{st}-{su}] {base}"; rows.append((full,fn,new,st,su,ty,cf,src)); n+=1
+        print(f"{st:5}{su:7}{ty:10}{cf:5}{src:14}{base[:46]}")
+        if a.apply and new!=fn:
             try: os.rename(full,unique_path(os.path.join(dp,new)))
             except Exception as e: print("  rename-fail:",e)
+    _word_quit()
     logp=a.log or os.path.join(a.root,"_doc_handler_log.csv")
     with open(logp,"w",encoding="utf-8",newline="") as g:
         w=csv.writer(g); w.writerow(["path","old","new","stream","subject","type","conf","source"]); w.writerows(rows)

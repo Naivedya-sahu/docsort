@@ -2,6 +2,18 @@
 
 All notable changes. Newest on top.
 
+## [0.7.0] — 2026-06-23
+### Added
+- **`.doc` (old binary Word) reader** via a reused Word COM instance (Windows + Word + `pywin32`).
+  Falls back to filename tier if Word/pywin32 absent. Optional dep `pip install .[doc]`.
+- **`--retag`**: re-classify already-prefixed files — re-runs the model on the content and
+  rewrites the prefix. Use after tuning the prompt or promoting a `~PROPOSE` tag to a real code.
+### Fixed
+- **Tool's own outputs were treated as inputs** — `TAG-REVIEW.md` (and README/CHANGELOG/etc.)
+  could be classified/renamed. Now skipped (`SKIP_NAMES`, `_doc_handler*`, `_move*`).
+- **Frontier `claude` on Windows** — resolve `claude`/`claude.cmd` via `shutil.which` + `shell`
+  on Windows, instead of silently failing to 99UNS.
+
 ## [0.6.1] — 2026-06-23
 ### Fixed
 - **TUI broke in cmd.exe** — v0.5.0 forced `legacy_windows=False`, which emits raw ANSI/VT that

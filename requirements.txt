@@ -5,6 +5,7 @@ pymupdf>=1.24        # PDF text extraction + page-to-image render  (REQUIRED)
 rich>=13.0           # animated TUI front-end (tui.py)              (for TUI)
 python-docx>=1.1     # .docx text                                   (optional)
 python-pptx>=0.6     # .pptx text                                   (optional)
+pywin32>=306         # .doc (old binary Word) text — Windows + Word  (optional)
 # Standard library otherwise (urllib, csv, json, base64, subprocess) — no other pip deps.
 
 # -------------------------------------------------------

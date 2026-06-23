@@ -63,13 +63,13 @@ def run_tag(a):
                   TimeElapsedColumn(), console=C)
     task=prog.add_task("tagging", total=len(targets))
     with Live(console=C, refresh_per_second=8) as live:
-        for dp,fn in targets:
+        for dp,fn,base in targets:
             full=os.path.join(dp,fn); rel=os.path.relpath(dp,a.root)
-            st,su,ty,cf,src=dh.classify(a,sysp,full,fn,rel)
+            st,su,ty,cf,src=dh.classify(a,sysp,full,base,rel)
             counts[f"{st}-{su}"]+=1; conf_low+=(cf=="low")
-            rows.append((full,fn,f"[{st}-{su}] {fn}",st,su,ty,cf,src))
+            rows.append((full,fn,f"[{st}-{su}] {base}",st,su,ty,cf,src))
             if a.apply:
-                try: os.rename(full,dh.unique_path(os.path.join(dp,f"[{st}-{su}] {fn}")))
+                try: os.rename(full,dh.unique_path(os.path.join(dp,f"[{st}-{su}] {base}")))
                 except Exception: pass
             prog.advance(task)
             live.update(Panel.fit(prog, title=BANNER, subtitle=f"[dim]{fn[:48]}[/]", box=BOX))
