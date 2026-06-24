@@ -168,8 +168,9 @@ def llm(a,backend,system,user_text,image_png=None):
                 return out.stdout
             tmpl=getattr(a,"frontier_cmd","") or ""   # cmd: templated CLI from config, prompt via stdin
             if not tmpl: return ""
-            out=subprocess.run(tmpl,input=oneshot,capture_output=True,text=True,
-                               timeout=180,shell=True,cwd=neutral)
+            import shlex
+            out=subprocess.run(shlex.split(tmpl),input=oneshot,capture_output=True,text=True,
+                               timeout=180,cwd=neutral)
             return out.stdout
         except Exception: return ""
     return ""
