@@ -11,7 +11,7 @@ streams live into the dark log pane. An in-app editor lets you edit the tag list
 Tkinter ships with standard CPython on Windows; no extra install.
 """
 from __future__ import annotations
-import os, sys, subprocess, threading, queue
+import os, sys, time, subprocess, threading, queue
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
@@ -112,10 +112,29 @@ class App:
         bar = tk.Frame(root, bg=BG); bar.pack(fill="x", padx=18, pady=(10, 6))
         self.run_btn = self._btn(bar, "Run", self.run, accent=True)
         self.run_btn.pack(side="left")
+        self.stop_btn = self._btn(bar, "Stop", self.stop, accent=False)
+        self.stop_btn.configure(state="disabled"); self.stop_btn.pack(side="left", padx=8)
         self._btn(bar, "Edit Tags", self.edit_tags, accent=False).pack(side="left", padx=8)
         self._btn(bar, "Clear log", lambda: self.log_box.delete("1.0", "end"), accent=False).pack(side="left")
         self.status = tk.Label(bar, text="idle", bg=BG, fg=MUTED, font=FONT)
         self.status.pack(side="right")
+
+        # --- progress + live stats strip ---
+        st = self._card(root)
+        self.pbar = tk.Canvas(st, height=16, bg=PANEL2, highlightthickness=0, bd=0)
+        self.pbar.pack(fill="x", padx=14, pady=(12, 4))
+        self.pbar_fill = self.pbar.create_rectangle(0, 0, 0, 16, fill=ACCENT, width=0)
+        self.var_prog = tk.StringVar(value="0 / 0  0%")
+        self.var_tps  = tk.StringVar(value="— tok/s")
+        self.var_toks = tk.StringVar(value="0 tok")
+        self.var_df   = tk.StringVar(value="done 0 / fail 0")
+        self.var_el   = tk.StringVar(value="0s")
+        self.var_eta  = tk.StringVar(value="~—")
+        srow = tk.Frame(st, bg=PANEL); srow.pack(fill="x", padx=14, pady=(0, 12))
+        for v, w in ((self.var_prog, 12), (self.var_tps, 12), (self.var_toks, 12),
+                     (self.var_df, 16), (self.var_el, 8), (self.var_eta, 8)):
+            tk.Label(srow, textvariable=v, bg=PANEL, fg=MUTED, font=FONT, width=w, anchor="w").pack(side="left")
+        self._run_t0 = 0.0
 
         # --- log pane ---
         logwrap = tk.Frame(root, bg=PANEL2, bd=0); logwrap.pack(fill="both", expand=True, padx=18, pady=(6, 16))
@@ -188,8 +207,35 @@ class App:
         if not self.misc.get():           cmd.append("--no-misc")     # engine default is ON
         if self.frontier.get() != "none": cmd += ["--frontier", self.frontier.get()]
         self.log("[gui] $ %s\n" % " ".join(cmd[2:]))
-        self.run_btn.config(state="disabled"); self.status.config(text="running...", fg=ACCENT2)
+        self._run_t0 = time.time()
+        self.var_prog.set("0 / 0  0%"); self.var_tps.set("— tok/s"); self.var_toks.set("0 tok")
+        self.var_df.set("done 0 / fail 0"); self.var_eta.set("~—")
+        self.pbar.coords(self.pbar_fill, 0, 0, 0, 16)
+        self.run_btn.config(state="disabled"); self.stop_btn.config(state="normal")
+        self.status.config(text="running...", fg=ACCENT2)
         threading.Thread(target=self._worker, args=(cmd,), daemon=True).start()
+
+    def stop(self):
+        if self.proc:
+            try: self.proc.terminate()
+            except Exception: pass
+            self.status.config(text="stopping...", fg=MUTED)
+
+    def _set_progress(self, s):
+        try:
+            parts = s.split()
+            i, N = parts[1].split("/"); i, N = int(i), int(N)
+            kv = dict(p.split("=") for p in parts[2:] if "=" in p)
+            pct = int(100 * i / N) if N else 0
+            w = self.pbar.winfo_width() or 1
+            self.pbar.coords(self.pbar_fill, 0, 0, w * pct / 100, 16)
+            self.var_prog.set(f"{i} / {N}  {pct}%")
+            self.var_tps.set(f"{kv.get('tps','—')} tok/s")
+            self.var_toks.set(f"{kv.get('toks','0')} tok")
+            self.var_df.set(f"done {kv.get('done','0')} / fail {kv.get('failed','0')}")
+            self.var_eta.set("~" + kv.get("eta", "—"))
+        except Exception:
+            pass
 
     def _worker(self, cmd):
         try:
@@ -198,7 +244,10 @@ class App:
             for line in self.proc.stdout:
                 if "MuPDF error" in line:    # benign render warnings -> drop
                     continue
-                self.q.put(line)
+                if line.startswith("PROGRESS "):
+                    self.q.put(("__progress__", line.strip()))
+                else:
+                    self.q.put(line)
             self.proc.wait()
         except Exception as e:
             self.q.put("[gui] error: %s\n" % e)
@@ -211,13 +260,18 @@ class App:
                 item = self.q.get_nowait()
                 if item is None:
                     self.proc = None
-                    self.run_btn.config(state="normal"); self.status.config(text="done", fg=OK)
+                    self.run_btn.config(state="normal"); self.stop_btn.config(state="disabled")
+                    self.status.config(text="done", fg=OK)
                 elif isinstance(item, tuple) and item[0] == "__models__":
                     self._populate_models(item[1])
+                elif isinstance(item, tuple) and item[0] == "__progress__":
+                    self._set_progress(item[1])
                 else:
                     self.log(item)
         except queue.Empty:
             pass
+        if self.proc and self._run_t0:                  # live elapsed clock while running
+            self.var_el.set(f"{int(time.time() - self._run_t0)}s")
         self.root.after(100, self.drain)
 
     # ---- in-app tag editor ----

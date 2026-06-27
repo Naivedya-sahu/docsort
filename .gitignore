@@ -22,8 +22,10 @@ config.json
 .idea/
 .vscode/
 
-# Doc-handler run artifacts (logs are per-run, not source)
+# docsort run artifacts (per-run state, not source)
 _doc_handler_log.csv
+_docsort_log.csv
+_docsort_state.jsonl
 _move_log.csv
 *.skeleton.md
 

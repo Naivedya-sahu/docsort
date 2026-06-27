@@ -2,6 +2,21 @@
 
 All notable changes. Newest on top.
 
+## [0.9.0] — 2026-06-28
+### Added
+- **Run journal** (`_docsort_state.jsonl`, append-only, flushed per file) — crash-safe source
+  of truth: `{rel, mtime, status, label, source, error, ts}`. The CSV is now a derived report.
+- **`--resume`** — skip files already `done` in the journal (matched by path + mtime).
+- **Graceful pause** — Ctrl-C finishes the current file, flushes, prints a resume hint (exit 130).
+- **Server-health guard** — after 3 consecutive files where the model returned nothing, re-ping
+  `/v1/models`; if down, stop with a resume hint instead of silently mislabeling the rest `99UNS`.
+- **Live progress** — CLI emits `PROGRESS i/N done=.. failed=.. tps=.. toks=.. eta=..s` per file.
+- **GUI overhaul** — progress bar + live stats strip (tok/s, total tokens, done/failed, elapsed,
+  ~ETA) driven by the PROGRESS stream, plus a **Stop** button (terminates the run; resumable).
+### Notes
+- ETA/tok/s are best-effort (psychological); missing values show `—`. Journal lives in the
+  processed dir (the COPY when `--copy`); resume by pointing at that dir with `--resume`.
+
 ## [0.8.0] — 2026-06-27
 ### Changed (breaking)
 - **Renamed the project `doc-handler` → `docsort`.** Package is now `docsort/`; commands are

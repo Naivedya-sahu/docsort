@@ -17,7 +17,7 @@ Backends: --backend local (main) ; --frontier none|claude|cmd (99UNS fallback, c
 Deps: see requirements.txt.
 """
 from __future__ import annotations
-import os, sys, json, csv, re, base64, argparse, subprocess, shutil, shlex, urllib.request
+import os, sys, json, csv, re, time, base64, argparse, subprocess, shutil, shlex, urllib.request
 
 try:                                   # works installed (package) and as `python -m docsort.cli`
     from .config import (load_config, resolve_api, resolve_location, arg_defaults,
@@ -57,6 +57,18 @@ def edit_file(p):
 EXT_TEXT={".pdf",".txt",".md",".docx",".pptx",".ppt",".doc"}
 MIN_TEXT=80; DEEP_PAGES=5; DEEP_CAP=4000; DPI=120
 STREAMS=set(); SUBJECTS=set(); TYPES=set()   # filled from TAGS.md
+_STATS={"ttoks":0,"ok":0,"empty":0}          # per-file model accounting (reset each file)
+
+def journal_done(root):
+    """rel-paths already 'done' in the run journal -> (rel, mtime) set, for --resume."""
+    p=os.path.join(root,"_docsort_state.jsonl"); seen={}
+    if not os.path.isfile(p): return seen
+    for ln in open(p,encoding="utf-8",errors="replace"):
+        try:
+            j=json.loads(ln)
+            if j.get("status")=="done": seen[j.get("rel","")]=j.get("mtime",0)
+        except Exception: pass
+    return seen
 
 # ---------- tag loading (single source) ----------
 def load_tags(path):
@@ -172,8 +184,10 @@ def llm(a,backend,system,user_text,image_png=None):
             model=a.vision_model if image_png else a.model
             r=_http(a.api,{"model":model,"temperature":0,"max_tokens":24,"messages":msgs},
                     {"Content-Type":"application/json"})
+            u=r.get("usage") or {}; _STATS["ttoks"]+=int(u.get("total_tokens",0) or u.get("completion_tokens",0)); _STATS["ok"]+=1
             return r["choices"][0]["message"]["content"]
         except Exception:
+            _STATS["empty"]+=1
             return ""   # -> decide() -> 99UNS; one bad call never kills the run
     if backend in ("claude","cmd"):   # subscription CLIs — NO API key. Text only.
         import tempfile
@@ -329,6 +343,7 @@ def add_args(ap):
     ap.add_argument("--move",default=None,help="destination root; or @archive to use config archive_root")
     ap.add_argument("--review",action="store_true",help="aggregate the run log into TAG-REVIEW.md (offline)")
     ap.add_argument("--retag",action="store_true",help="re-classify already-prefixed files (after tuning/promoting a proposal)")
+    ap.add_argument("--resume",action="store_true",help="skip files already done in the run journal (_docsort_state.jsonl)")
     ap.add_argument("--log",default=None)
 
 def main(argv=None):
@@ -373,27 +388,60 @@ def main(argv=None):
             vm,up=resolve_model(a.api,a.vision_model,prefer_vision=True)
             if up and vm!=a.vision_model: print(f"[vision] '{a.vision_model}' not loaded -> '{vm}'"); a.vision_model=vm
     sysp=setup(a); rows=[]; n=0
-    items=iter_tagged(a.root) if a.retag else iter_targets(a.root)
-    for dp,fn,base in items:
-        full=os.path.join(dp,fn); rel=os.path.relpath(dp,a.root)
-        st,su,ty,cf,src=classify(a,sysp,full,base,rel)
-        new=f"[{st}-{su}] {base}"; rows.append((full,fn,new,st,su,ty,cf,src)); n+=1
-        tomisc=bool(a.misc) and su=="99UNS"
-        print(f"{st:5}{su:7}{ty:10}{cf:5}{src:14}{base[:46]}{'  ->misc' if tomisc else ''}")
-        if a.apply:
-            cur=full
-            if new!=fn:
-                cur=unique_path(os.path.join(dp,new))
-                try: os.rename(full,cur)
-                except Exception as e: print("  rename-fail:",e); cur=full
-            if tomisc:
-                try: move_to_misc(a.root,cur)
-                except Exception as e: print("  misc-move-fail:",e)
-    _word_quit()
+    items=list(iter_tagged(a.root) if a.retag else iter_targets(a.root))
+    N=len(items)
+    done_set=journal_done(a.root) if a.resume else {}
+    jf=open(os.path.join(a.root,"_docsort_state.jsonl"),"a",encoding="utf-8")
+    t0=time.time(); proc=0; dn=0; fl=0; toks=0; dead=0; skipped=0
+    try:
+        for dp,fn,base in items:
+            full=os.path.join(dp,fn); rel=os.path.relpath(full,a.root)
+            try: mt=int(os.path.getmtime(full))
+            except Exception: mt=0
+            if a.resume and done_set.get(rel)==mt:
+                skipped+=1; continue                         # already done this exact file
+            _STATS["ttoks"]=0; _STATS["ok"]=0; _STATS["empty"]=0
+            status="done"; err=""
+            try:
+                st,su,ty,cf,src=classify(a,sysp,full,base,rel)
+            except Exception as e:
+                st,su,ty,cf,src=("CW","99UNS","misc","low","error"); status="failed"; err=str(e)[:200]
+            toks+=_STATS["ttoks"]
+            new=f"[{st}-{su}] {base}"; rows.append((full,fn,new,st,su,ty,cf,src)); n+=1; proc+=1
+            tomisc=bool(a.misc) and su=="99UNS" and status=="done"
+            print(f"{st:5}{su:7}{ty:10}{cf:5}{src:14}{base[:46]}{'  ->misc' if tomisc else ''}{'  FAIL' if status=='failed' else ''}")
+            if a.apply and status=="done":
+                cur=full
+                if new!=fn:
+                    cur=unique_path(os.path.join(dp,new))
+                    try: os.rename(full,cur)
+                    except Exception as e: print("  rename-fail:",e); cur=full; status="failed"; err="rename:"+str(e)[:160]
+                if tomisc:
+                    try: move_to_misc(a.root,cur)
+                    except Exception as e: print("  misc-move-fail:",e)
+            dn+=(status=="done"); fl+=(status=="failed")
+            jf.write(json.dumps({"rel":rel,"name":base,"mtime":mt,"status":status,"stream":st,
+                                 "subject":su,"type":ty,"conf":cf,"source":src,"error":err,
+                                 "ts":int(time.time())})+"\n"); jf.flush()
+            el=time.time()-t0; tps=(toks/el) if el>0 else 0; avg=el/max(proc,1)
+            eta=int(avg*max(N-proc-skipped,0))
+            print(f"PROGRESS {proc}/{N} done={dn} failed={fl} tps={tps:.0f} toks={toks} eta={eta}s",flush=True)
+            if status=="done" and _STATS["ok"]==0 and _STATS["empty"]>0: dead+=1
+            else: dead=0
+            if dead>=3 and not available_models(a.api):    # model server likely dropped mid-run
+                jf.close(); _word_quit()
+                print(f"\n[server] model unreachable at {a.api} — {dn} done. "
+                      f"Fix LM Studio, then resume with: docsort \"{a.root}\" --resume")
+                sys.exit(3)
+    except KeyboardInterrupt:
+        jf.close(); _word_quit()
+        print(f"\n[paused] {dn} done, {fl} failed. Resume with: docsort \"{a.root}\" --resume")
+        sys.exit(130)
+    jf.close(); _word_quit()
     logp=a.log or os.path.join(a.root,"_docsort_log.csv")
     with open(logp,"w",encoding="utf-8",newline="") as g:
         w=csv.writer(g); w.writerow(["path","old","new","stream","subject","type","conf","source"]); w.writerows(rows)
-    print(f"\n{'APPLIED' if a.apply else 'DRY-RUN'}: {n} files. log: {logp}")
+    print(f"\n{'APPLIED' if a.apply else 'DRY-RUN'}: {n} files ({fl} failed). log: {logp}")
     if not a.apply: print("Review log (conf=low, source=filename/vision/frontier), then --apply.")
 
 if __name__=="__main__": main()
