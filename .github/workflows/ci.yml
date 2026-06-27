@@ -18,8 +18,10 @@ jobs:
       - name: Syntax check
         run: python -m py_compile docsort/cli.py docsort/config.py docsort/gui.py
       - name: Install
-        run: pip install .
+        run: pip install . pytest
       - name: Import check (CLI engine)
         run: python -c "import docsort.cli as c; assert hasattr(c, 'main')"
       - name: CLI smoke
         run: docsort --help
+      - name: Tests
+        run: pytest -q

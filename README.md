@@ -18,7 +18,11 @@ genuinely-ambiguous files. Ships with both a **CLI** (`docsort`) and a **modern 
 
 ## Install
 
-Clone and install with pip (Python 3.9+, Windows):
+**Option A — prebuilt executable (no Python).** Grab `docsort-gui.exe` (GUI) and/or `docsort.exe`
+(CLI) from the [latest release](https://github.com/Naivedya-sahu/docsort/releases). Double-click the
+GUI exe and go. You still need [LM Studio](https://lmstudio.ai) running with a VL model loaded.
+
+**Option B — pip** (Python 3.9+, Windows):
 
 ```bash
 git clone https://github.com/Naivedya-sahu/docsort.git

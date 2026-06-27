@@ -59,6 +59,19 @@ GUI equivalent: `docsort-gui` (or `run.bat`) — folder picker + the same toggle
 | `--retag` | re-classify already-prefixed files (after tuning/promoting) |
 | `--frontier claude\|cmd` | hard-99UNS fallback (see §6); `claude` is bound to haiku |
 | `--backend local` | main backend |
+| `--resume` | skip files already `done` in the run journal (after a pause/crash) |
+| `--retry-failed` | re-process only files marked `failed` in the journal |
+| `--undo` | reverse the renames/moves recorded in the journal (restore originals) |
+| `--exclude PATH` / `--include PATH` | skip / restrict-to folders (repeatable; also config `exclude`/`include`) |
+| `--report` | (re)build `DOCSORT-REPORT.md` from the journal + update the global index (offline) |
+| `--stats` | print lifetime totals from `%APPDATA%/docsort/index.jsonl`, then exit |
+| `--list-models` | list models loaded in LM Studio (at `--host`), then exit |
+| `--edit-tags` | open your `TAGS.md` in an editor, then exit |
+
+**Robustness:** runs are crash-safe — a journal (`_docsort_state.jsonl`) is written per file. Ctrl-C
+pauses gracefully (`--resume` continues). If LM Studio drops mid-run, docsort stops with a resume
+hint instead of mislabeling the rest `99UNS`. Each run also emits `PROGRESS i/N … tps=… eta=…s` lines
+(the GUI turns these into a progress bar + tok/s + ETA).
 
 ## 6. Backends (all key-free)
 - **local** — LM Studio (default). Free, no key. The recommended main backend.

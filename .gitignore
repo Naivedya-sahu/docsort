@@ -35,3 +35,8 @@ TAG-REVIEW.md
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# PyInstaller
+*.spec
+dist_test/
+build_test/
