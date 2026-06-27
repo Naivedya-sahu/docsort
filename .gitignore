@@ -12,6 +12,9 @@ env/
 # user config (keep config.example.json as the template)
 config.json
 
+# GSD / tooling planning dir
+.planning/
+
 # Tooling
 .pytest_cache/
 .mypy_cache/

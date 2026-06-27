@@ -1,4 +1,4 @@
-# Doc-handler — system prompt template
+# docsort — system prompt template
 
 The `<SYSTEM>` block is the model's system prompt. `{{STREAMS}}`, `{{SUBJECTS}}`,
 `{{TYPES}}` are filled at runtime from `TAGS.md` (single source). Edit rules/examples

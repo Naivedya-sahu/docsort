@@ -1,4 +1,4 @@
-# Doc-handler — Guide
+# docsort — Guide
 
 ## 1. What the LLM receives (per file)
 Two messages:
@@ -31,45 +31,52 @@ Trust order: `text > text5 > vision > vision3 > frontier > filename` (the `sourc
 
 ## 4. Full workflow
 ```
-0. BACKUP        copy Academics -> AcademicsCOPY                 (work on the copy)
-1. DEDUP         dupeGuru: Scan Type Folders, then Contents; Re-Prioritize (suffix down);
+0. DEDUP         dupeGuru: Scan Type Folders, then Contents; Re-Prioritize (suffix down);
                  Move Marked to quarantine. Kill copies BEFORE tagging.
-2. CONFIG        config.json: host -> your model server; locations -> the folder(s)
-3. TAG dry-run   python doc_handler.py --location academics --vision
+1. CONFIG        %APPDATA%\docsort\config.json: host -> your LM Studio; locations -> folder(s)
+2. TAG dry-run   docsort --location academics            (or a raw path)
                  -> review _doc_handler_log.csv   (or: --review -> TAG-REVIEW.md)
-4. TAG apply     python doc_handler.py --location academics --vision --apply
-5. (optional)    promote any ~PROPOSE tags into TAGS.md, then:  ... --retag --apply
-6. MOVE          python doc_handler.py --location academics --move @archive          (dry-run)
-                 python doc_handler.py --location academics --move @archive --apply
-7. SPECIAL       handle <archive>/{GATE,PROJ,RES,REC} folders separately
+3. TAG apply     docsort --location academics --copy --apply    (--copy keeps originals safe)
+4. (optional)    promote any ~PROPOSE tags via --edit-tags, then:  ... --retag --apply
+5. MOVE          docsort --location academics --move @archive          (dry-run)
+                 docsort --location academics --move @archive --apply
+6. SPECIAL       handle <archive>/{GATE,PROJ,RES,REC} folders separately
 ```
-TUI equivalent: `python tui.py` (menu: tag dry/apply, move).
+GUI equivalent: `docsort-gui` (or `run.bat`) — folder picker + the same toggles.
 
 ## 5. Flags
 | Flag | Purpose |
 |---|---|
 | `--location NAME` / `root` | folder from config, or a raw path |
 | `--host NAME\|URL` | model endpoint (config `hosts` name or URL) |
-| `--vision [--vision-model M]` | enable image tier for no-text PDFs |
+| `--vision [--vision-model M]` | enable image tier for no-text PDFs (config default: on) |
+| `--copy` | copy the folder to `<name>COPY` and tag the copy (originals untouched) |
 | `--apply` | rename (default is dry-run) |
+| `--misc` / `--no-misc` | sweep `99UNS` files into a `misc\` subfolder (**default ON**) |
 | `--move DEST` / `--move @archive` | relocate prefixed files into DEST/STREAM/SUBJECT |
+| `--edit-tags` | open your `TAGS.md` in an editor, then exit |
 | `--review` | aggregate log → TAG-REVIEW.md (offline) |
 | `--retag` | re-classify already-prefixed files (after tuning/promoting) |
-| `--frontier claude\|cmd\|openai` | hard-99UNS fallback (see §6) |
-| `--backend local\|openai` | main backend |
+| `--frontier claude\|cmd` | hard-99UNS fallback (see §6); `claude` is bound to haiku |
+| `--backend local` | main backend |
 
-## 6. Backends (free vs API)
+## 6. Backends (all key-free)
 - **local** — LM Studio (default). Free, no key. The recommended main backend.
-- **frontier claude** — Claude Code CLI on your **Claude subscription, NO API key**. Pinned to
-  `--frontier-model haiku` (standard context; the default 1M model needs paid credits). Slower
-  (~30 s/file) — use only for hard cases.
+- **frontier claude** — Claude Code CLI on your **Claude subscription, NO API key**. Bound to the
+  **haiku** model (standard context, sub-covered). Slower (~30 s/file) — use only for hard cases.
 - **frontier cmd** — `--frontier-cmd "<shell template>"`, prompt piped via stdin → wire ANY local/
   sub CLI without a key.
-- **openai / frontier openai** — needs `OPENAI_API_KEY` (paid). ChatGPT web sub is NOT an API.
+- *(No OpenAI/ChatGPT backend — the API path was removed; a ChatGPT web sub is not an API.)*
 
 ## 7. Tuning
-- Add/edit tags in **`TAGS.md`** only (flows to script + prompt). Sharpen rules/examples in `system_prompt.md`.
-- `config.json` holds endpoints, locations, archive_root, and `min_text/deep_pages/dpi`.
+- Add/edit tags in **`TAGS.md`** only — via **Edit Tags** (GUI) or `docsort --edit-tags`.
+  Changes flow to both the script and the model prompt. Sharpen rules/examples in `system_prompt.md`.
+- User files live in `%APPDATA%\docsort\` (Windows) / `~/.docsort/`. `config.json` holds
+  endpoints, named hosts, locations, archive_root, and `min_text/deep_pages/dpi`. Reinstalling never
+  overwrites your edited copies.
+- **Models auto-resolve for any user:** if the model id in config isn't loaded in LM Studio, the app
+  picks whatever VL model *is* loaded (see the `[model] ->` / `[vision] ->` line). You rarely need to
+  set the exact id.
 
 ## 8. Reviewing & reversibility
 - `--review` → TAG-REVIEW.md: distribution, proposed (`~`) tags, low-confidence list.
@@ -82,8 +89,8 @@ TUI equivalent: `python tui.py` (menu: tag dry/apply, move).
 | Server unreachable / hangs | start LM Studio; enable LAN + firewall TCP 1234 (see TROUBLESHOOTING.md) |
 | Every file `99UNS` | weak model — use a 7B/8B vision model, or `--frontier claude` |
 | Configured model not used | not loaded; auto-resolve picked a loaded one (see `[model] ->` line) |
-| PDFs skipped | `pip install pymupdf` |
-| `.docx/.pptx` skipped | `pip install python-docx python-pptx` |
-| `.doc` filename-only | needs Word + `pip install pywin32` (or convert .doc→.docx) |
-| TUI garbled in cmd | fixed in 0.6.1 (ASCII-safe); use Windows Terminal for nicer look |
-| frontier claude empty | ensure `claude` CLI logged in; it uses `--model haiku` by default |
+| PDFs skipped | `pip install pymupdf` (bundled as a dependency; reinstall if missing) |
+| `.docx/.pptx` skipped | `pip install "docsort[office]"` |
+| `.doc` filename-only | needs Word + `pip install "docsort[doc]"` (pywin32), or convert .doc→.docx |
+| frontier claude empty / not found | install Claude Code, run `claude` once to log in; it uses `--model haiku` |
+| GUI won't start | needs Tkinter (ships with standard CPython on Windows; on Linux `apt install python3-tk`) |

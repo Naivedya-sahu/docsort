@@ -16,8 +16,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Syntax check
-        run: python -m py_compile doc_handler.py
-      - name: Import check
-        run: python -c "import doc_handler; assert hasattr(doc_handler,'main')"
-      - name: Install (with deps)
+        run: python -m py_compile docsort/cli.py docsort/config.py docsort/gui.py
+      - name: Install
         run: pip install .
+      - name: Import check (CLI engine)
+        run: python -c "import docsort.cli as c; assert hasattr(c, 'main')"
+      - name: CLI smoke
+        run: docsort --help

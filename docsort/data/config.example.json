@@ -1,0 +1,33 @@
+{
+  "_comment": "Seeded to your per-user dir as config.json on first run. Edit that copy. CLI flags override these. See GUIDE.md.",
+
+  "model": {
+    "host": "localhost",
+    "model": "local-model",
+    "vision_model": "local-vision",
+    "backend": "local",
+    "frontier": "none",
+    "timeout": 180,
+    "_models_note": "Model ids auto-resolve: if these aren't loaded in LM Studio, the app picks whatever VL model IS loaded. Set 'frontier' to 'claude' to use Claude Code (haiku) for hard 99UNS cases."
+  },
+
+  "hosts": {
+    "localhost": "http://localhost:1234/v1/chat/completions",
+    "_note": "Add named hosts here, e.g. a LAN/Tailscale machine running LM Studio: \"laptop\": \"http://hostname:1234/v1/chat/completions\". Use --host NAME to switch."
+  },
+
+  "locations": {
+    "_example": { "type": "local", "path": "C:/path/to/AcademicsCOPY", "note": "name a folder so you can pass --location example instead of the full path" }
+  },
+
+  "archive_root": "",
+
+  "options": {
+    "vision": true,
+    "apply": false,
+    "min_text": 80,
+    "deep_pages": 5,
+    "deep_cap": 4000,
+    "dpi": 120
+  }
+}

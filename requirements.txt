@@ -1,31 +1,31 @@
-# Doc-handler — software requirements for independent use
-# =======================================================
+# docsort — software requirements
+# ====================================
+# Easiest: `pip install .` (or `pip install ".[all]"`) from a clone — installs the
+# package + the commands `docsort` and `docsort-gui`. This file is the manual list.
+#
 # PYTHON PACKAGES  (pip install -r requirements.txt)
 pymupdf>=1.24        # PDF text extraction + page-to-image render  (REQUIRED)
-rich>=13.0           # animated TUI front-end (tui.py)              (for TUI)
-python-docx>=1.1     # .docx text                                   (optional)
-python-pptx>=0.6     # .pptx text                                   (optional)
-pywin32>=306         # .doc (old binary Word) text — Windows + Word  (optional)
-# Standard library otherwise (urllib, csv, json, base64, subprocess) — no other pip deps.
+python-docx>=1.1     # .docx text                                   (optional, extra: office)
+python-pptx>=0.6     # .pptx text                                   (optional, extra: office)
+pywin32>=306         # .doc (old binary Word) text — Windows + Word  (optional, extra: doc)
+# The GUI uses Tkinter from the standard library (ships with CPython on Windows).
+# Everything else is stdlib (urllib, csv, json, base64, subprocess) — no other pip deps.
 
 # -------------------------------------------------------
 # EXTERNAL SOFTWARE  (install separately — not via pip)
 # -------------------------------------------------------
-# Python            3.9+                          run the scripts
+# Python            3.9+                          run the app
 # LM Studio         lmstudio.ai                   local OpenAI-compatible LLM server (localhost:1234)
-# Vision LLM model  Qwen2-VL-7B-Instruct          reads text AND images; ~8 GB VRAM
-#                   or MiniCPM-V-2.6
+# Vision LLM model  any Qwen-VL (3B-8B)           reads text AND images; auto-detected if loaded
 #
 # OPTIONAL FRONTIER (only for hard 99UNS cases, via --frontier):
-#   Claude Code CLI   claude.ai/code              `--frontier claude` shells out to `claude -p`
-#                                                 (uses your Claude subscription; text-only)
-#   OpenAI API key    set OPENAI_API_KEY env      `--frontier openai` or `--backend openai`
-#                                                 (NOTE: ChatGPT Plus/Go web sub is NOT an API —
-#                                                  programmatic use needs an API key / credits)
+#   Claude Code CLI   claude.com/claude-code      `--frontier claude` -> `claude -p --model haiku`
+#                                                 (uses your Claude subscription; text-only, NO API key)
+#   any CLI           --frontier cmd              `--frontier-cmd "<template>"`, prompt piped via stdin
+#                                                 (NOTE: no OpenAI/ChatGPT backend — that web sub is not an API)
 #
-# OTHER TOOLS in the wider workflow (not needed by Doc-handler itself):
+# OTHER TOOLS in the wider workflow (not needed by docsort itself):
 #   dupeGuru   — content-hash dedup BEFORE tagging
 #   WizTree    — tree/CSV inventory export
 #
-# Minimum to run Doc-handler alone: Python + pymupdf + LM Studio + one vision model.
-# Add rich for the TUI.
+# Minimum to run: Python + pymupdf + LM Studio + one VL model.

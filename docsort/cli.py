@@ -1,22 +1,30 @@
 #!/usr/bin/env python3
 """
-doc_handler — tag academic documents with a local (or frontier) LLM, then move by prefix.
+docsort.cli — tag academic documents with a local (or frontier) LLM, then move by prefix.
 
 Tag vocabulary lives in TAGS.md (single source) and is injected into the model prompt.
 Classification tiers: TEXT -> 5-page ESCALATE -> VISION (+page-3) -> FILENAME.
-On a hard 99UNS, an optional FRONTIER model (Claude Code CLI / OpenAI API) gives a verdict.
+On a hard 99UNS, an optional FRONTIER model (Claude Code CLI, haiku) gives a verdict.
 
-  python doc_handler.py "D:\\AcademicsCOPY" --vision --vision-model qwen2-vl-7b
-  python doc_handler.py "D:\\AcademicsCOPY" --apply --vision --vision-model qwen2-vl-7b
-  python doc_handler.py "D:\\AcademicsCOPY" --frontier claude         # Claude Code sub for hard cases
-  python doc_handler.py "D:\\AcademicsCOPY" --move "D:\\Archive\\Academics" --apply
+  docsort "D:\\AcademicsCOPY"                       # dry-run (config supplies host/model)
+  docsort "D:\\AcademicsCOPY" --apply               # rename in place
+  docsort "D:\\AcademicsCOPY" --copy --apply        # tag a copy, originals untouched
+  docsort "D:\\AcademicsCOPY" --frontier claude      # Claude Code (haiku) for hard cases
+  docsort "D:\\AcademicsCOPY" --move "D:\\Archive" --apply
+  docsort --edit-tags                                # open your TAGS.md in an editor
 
-Backends: --backend local|openai (main) ; --frontier none|claude|openai (99UNS fallback).
+Backends: --backend local (main) ; --frontier none|claude|cmd (99UNS fallback, claude=haiku).
 Deps: see requirements.txt.
 """
 from __future__ import annotations
-import os, sys, json, csv, re, base64, argparse, subprocess, shutil, urllib.request
-from config import load_config, resolve_api, resolve_location, arg_defaults
+import os, sys, json, csv, re, base64, argparse, subprocess, shutil, shlex, urllib.request
+
+try:                                   # works installed (package) and as `python -m docsort.cli`
+    from .config import (load_config, resolve_api, resolve_location, arg_defaults,
+                         tags_path, prompt_path, config_path)
+except ImportError:                    # fallback if run as a loose script
+    from config import (load_config, resolve_api, resolve_location, arg_defaults,
+                        tags_path, prompt_path, config_path)
 
 def unique_path(p):
     """Avoid overwriting: foo.pdf -> foo__1.pdf if taken."""
@@ -25,7 +33,27 @@ def unique_path(p):
     while os.path.exists(f"{base}__{i}{ext}"): i+=1
     return f"{base}__{i}{ext}"
 
-HERE=os.path.dirname(os.path.abspath(__file__))
+def make_working_copy(root):
+    """Copy root -> <root>COPY (unique) and return the copy path, so originals stay untouched."""
+    base=root.rstrip("/\\"); dst=base+"COPY"; i=1
+    while os.path.exists(dst): dst=f"{base}COPY{i}"; i+=1
+    shutil.copytree(root,dst); return dst
+
+MISC_DIR="misc"
+def move_to_misc(root,cur):
+    """Quarantine an unsure (99UNS) file into <root>/misc/. Returns the new path."""
+    d=os.path.join(root,MISC_DIR); os.makedirs(d,exist_ok=True)
+    tgt=unique_path(os.path.join(d,os.path.basename(cur))); shutil.move(cur,tgt); return tgt
+
+def edit_file(p):
+    """Open a file in the OS default editor (Notepad on Windows)."""
+    print("opening for edit:",p)
+    try:
+        if os.name=="nt": os.startfile(p)                       # type: ignore[attr-defined]
+        else: subprocess.Popen([os.environ.get("EDITOR","nano"),p])
+    except Exception as e:
+        print("could not open an editor:",e,"\nedit this file manually:",p)
+
 EXT_TEXT={".pdf",".txt",".md",".docx",".pptx",".ppt",".doc"}
 MIN_TEXT=80; DEEP_PAGES=5; DEEP_CAP=4000; DPI=120
 STREAMS=set(); SUBJECTS=set(); TYPES=set()   # filled from TAGS.md
@@ -121,7 +149,7 @@ def available_models(api):
 
 def resolve_model(api,want,prefer_vision=False):
     """If 'want' isn't loaded on the server, fall back to a loaded model (vision-preferring).
-    Returns (model_id, server_reachable)."""
+    Returns (model_id, server_reachable). Works for any user: picks whatever VL model is loaded."""
     av=available_models(api)
     if not av: return want, False
     if want in av: return want, True
@@ -132,8 +160,8 @@ def resolve_model(api,want,prefer_vision=False):
     return pick, True
 
 def llm(a,backend,system,user_text,image_png=None):
-    """Return raw model text. backend: local | openai | claude."""
-    if backend in ("local","openai"):
+    """Return raw model text. backend: local | claude | cmd."""
+    if backend=="local":
         if image_png:
             content=[{"type":"text","text":user_text},
                      {"type":"image_url","image_url":{"url":"data:image/png;base64,"+base64.b64encode(image_png).decode()}}]
@@ -141,17 +169,11 @@ def llm(a,backend,system,user_text,image_png=None):
             content=user_text
         msgs=[{"role":"system","content":system},{"role":"user","content":content}]
         try:
-            if backend=="local":
-                model=a.vision_model if image_png else a.model
-                r=_http(a.api,{"model":model,"temperature":0,"max_tokens":24,"messages":msgs},
-                        {"Content-Type":"application/json"})
-            else:
-                key=os.environ.get("OPENAI_API_KEY","")
-                r=_http("https://api.openai.com/v1/chat/completions",
-                        {"model":a.openai_model,"temperature":0,"max_tokens":24,"messages":msgs},
-                        {"Content-Type":"application/json","Authorization":"Bearer "+key})
+            model=a.vision_model if image_png else a.model
+            r=_http(a.api,{"model":model,"temperature":0,"max_tokens":24,"messages":msgs},
+                    {"Content-Type":"application/json"})
             return r["choices"][0]["message"]["content"]
-        except Exception as e:
+        except Exception:
             return ""   # -> decide() -> 99UNS; one bad call never kills the run
     if backend in ("claude","cmd"):   # subscription CLIs — NO API key. Text only.
         import tempfile
@@ -162,15 +184,13 @@ def llm(a,backend,system,user_text,image_png=None):
         try:
             if backend=="claude":       # Claude Code CLI -> Claude subscription
                 exe=shutil.which("claude") or "claude"
-                fm=getattr(a,"frontier_model","") or "haiku"   # standard-context, sub-covered
-                out=subprocess.run([exe,"-p","--model",fm,oneshot],capture_output=True,text=True,
-                                   timeout=180,cwd=neutral)   # resolved .exe -> no shell (shell+list mangles on Win)
+                out=subprocess.run([exe,"-p","--model","haiku",oneshot],capture_output=True,text=True,
+                                   timeout=180,cwd=neutral)   # bound to haiku (sub-covered, standard context); resolved .exe -> no shell
                 return out.stdout
             tmpl=getattr(a,"frontier_cmd","") or ""   # cmd: templated CLI from config, prompt via stdin
             if not tmpl: return ""
-            import shlex
             out=subprocess.run(shlex.split(tmpl),input=oneshot,capture_output=True,text=True,
-                               timeout=180,cwd=neutral)
+                               timeout=180,cwd=neutral)   # no shell -> no injection from the template
             return out.stdout
         except Exception: return ""
     return ""
@@ -245,7 +265,7 @@ SKIP_NAMES={"tag-review.md","readme.md","changelog.md","guide.md","troubleshooti
 def iter_targets(root):
     for dp,_,fns in os.walk(root):
         for fn in fns:
-            if fn.lower() in SKIP_NAMES or fn.startswith(("_doc_handler","_move")): continue
+            if fn.lower() in SKIP_NAMES or fn.startswith(("_docsort","_doc_handler","_move")): continue
             if os.path.splitext(fn)[1].lower() in EXT_TEXT and not fn.startswith("["):
                 yield dp,fn,fn                       # (dir, current name, base name)
 
@@ -261,7 +281,7 @@ def iter_tagged(root):
 def review(root, log=None):
     """Aggregate a run log into TAG-REVIEW.md: distribution, proposed (~) tags, low-conf. No model needed."""
     import collections
-    logp=log or os.path.join(root,"_doc_handler_log.csv")
+    logp=log or os.path.join(root,"_docsort_log.csv")
     if not os.path.isfile(logp): print("no log at",logp); return
     rows=list(csv.DictReader(open(logp,encoding="utf-8")))
     combo=collections.Counter(f"{r['stream']}-{r['subject']}" for r in rows)
@@ -288,34 +308,48 @@ def setup(a):
 
 def add_args(ap):
     ap.add_argument("root",nargs="?",default=None,help="folder to process (or use --location)")
-    ap.add_argument("--config",default=None,help="path to config.json (else config.json beside script)")
+    ap.add_argument("--config",default=None,help="path to config.json (else the per-user config)")
     ap.add_argument("--host",default=None,help="override model host: a name from config 'hosts' or a raw URL")
+    ap.add_argument("--list-models",action="store_true",help="list models loaded in LM Studio (at --host), then exit")
     ap.add_argument("--location",default=None,help="named location from config 'locations'")
     ap.add_argument("--api",default=None)
     ap.add_argument("--model",default=None)
     ap.add_argument("--vision",action="store_true",default=None)
     ap.add_argument("--vision-model",default=None)
-    ap.add_argument("--backend",default=None,choices=["local","openai"])
-    ap.add_argument("--frontier",default=None,choices=["none","claude","openai","cmd"])
-    ap.add_argument("--frontier-model",default="haiku",help="Claude Code model for --frontier claude (standard-context, sub-covered)")
+    ap.add_argument("--backend",default=None,choices=["local"])
+    ap.add_argument("--frontier",default=None,choices=["none","claude","cmd"])
     ap.add_argument("--frontier-cmd",dest="frontier_cmd",default=None,help="--frontier cmd: shell template; prompt piped via stdin")
-    ap.add_argument("--openai-model",default=None)
-    ap.add_argument("--tags",default=os.path.join(HERE,"TAGS.md"))
-    ap.add_argument("--prompt",default=os.path.join(HERE,"system_prompt.md"))
+    ap.add_argument("--tags",default=None,help="path to TAGS.md (default: your per-user copy)")
+    ap.add_argument("--prompt",default=None,help="path to system_prompt.md (default: your per-user copy)")
+    ap.add_argument("--edit-tags",action="store_true",help="open your TAGS.md in an editor, then exit")
     ap.add_argument("--apply",action="store_true",default=None)
+    ap.add_argument("--copy",action="store_true",default=None,help="copy the folder to <name>COPY and tag the copy (originals untouched)")
+    ap.add_argument("--misc",action=argparse.BooleanOptionalAction,default=True,
+                    help="move 99UNS (unsure) files into a 'misc' subfolder (default ON; use --no-misc to disable)")
     ap.add_argument("--move",default=None,help="destination root; or @archive to use config archive_root")
     ap.add_argument("--review",action="store_true",help="aggregate the run log into TAG-REVIEW.md (offline)")
     ap.add_argument("--retag",action="store_true",help="re-classify already-prefixed files (after tuning/promoting a proposal)")
     ap.add_argument("--log",default=None)
 
-def main():
-    ap=argparse.ArgumentParser(); add_args(ap)
-    pre,_=ap.parse_known_args()
+def main(argv=None):
+    ap=argparse.ArgumentParser(prog="docsort"); add_args(ap)
+    pre,_=ap.parse_known_args(argv)
+    if pre.edit_tags:                                # quick path: just open the tag list
+        edit_file(tags_path()); return
     cfg=load_config(pre.config)
     ad,glb=arg_defaults(cfg); ap.set_defaults(**ad)
-    a=ap.parse_args()
+    a=ap.parse_args(argv)
     global MIN_TEXT,DEEP_PAGES,DEEP_CAP,DPI
     MIN_TEXT,DEEP_PAGES,DEEP_CAP,DPI=glb["MIN_TEXT"],glb["DEEP_PAGES"],glb["DEEP_CAP"],glb["DPI"]
+    a.tags=a.tags or tags_path(); a.prompt=a.prompt or prompt_path()
+    if a.list_models:                                # show what's loaded, then exit (no root needed)
+        api=resolve_api(cfg,a.host) if a.host else a.api
+        ms=available_models(api); print(f"host: {api}")
+        if not ms: print("  (no response — is LM Studio running with a model loaded? check --host)")
+        for m in ms:
+            tag=" [VL]" if ("vl" in m.lower() or "vision" in m.lower()) else (" [embed]" if "embed" in m.lower() else "")
+            print(f"  {m}{tag}")
+        return
     root=resolve_location(cfg,a.location) if a.location else a.root
     if not root: ap.error("give a ROOT path or --location NAME (see config 'locations')")
     a.root=root
@@ -325,9 +359,14 @@ def main():
         if not dest: ap.error("--move @archive but config 'archive_root' is empty")
     else: dest=a.move
     if dest: move_by_prefix(a.root,dest,bool(a.apply)); return
+    if a.copy:                                   # safe mode: tag a copy, never the originals
+        a.root=make_working_copy(a.root); print(f"[copy] working on {a.root}")
     if a.host: a.api=resolve_api(cfg,a.host)
+    if a.frontier=="claude" and not shutil.which("claude"):
+        print("[frontier] 'claude' CLI not on PATH — install Claude Code and run `claude` once to log in. "
+              "Continuing without the frontier fallback."); a.frontier="none"
     if a.backend=="local":                       # adapt to whatever model is loaded
-        m,up=resolve_model(a.api,a.model)
+        m,up=resolve_model(a.api,a.model,prefer_vision=True)   # text tier too: grab any loaded VL model
         if not up: ap.error(f"model server unreachable at {a.api} — start LM Studio or fix --host (see TROUBLESHOOTING.md)")
         if m!=a.model: print(f"[model] '{a.model}' not loaded -> '{m}'"); a.model=m
         if a.vision:
@@ -339,12 +378,19 @@ def main():
         full=os.path.join(dp,fn); rel=os.path.relpath(dp,a.root)
         st,su,ty,cf,src=classify(a,sysp,full,base,rel)
         new=f"[{st}-{su}] {base}"; rows.append((full,fn,new,st,su,ty,cf,src)); n+=1
-        print(f"{st:5}{su:7}{ty:10}{cf:5}{src:14}{base[:46]}")
-        if a.apply and new!=fn:
-            try: os.rename(full,unique_path(os.path.join(dp,new)))
-            except Exception as e: print("  rename-fail:",e)
+        tomisc=bool(a.misc) and su=="99UNS"
+        print(f"{st:5}{su:7}{ty:10}{cf:5}{src:14}{base[:46]}{'  ->misc' if tomisc else ''}")
+        if a.apply:
+            cur=full
+            if new!=fn:
+                cur=unique_path(os.path.join(dp,new))
+                try: os.rename(full,cur)
+                except Exception as e: print("  rename-fail:",e); cur=full
+            if tomisc:
+                try: move_to_misc(a.root,cur)
+                except Exception as e: print("  misc-move-fail:",e)
     _word_quit()
-    logp=a.log or os.path.join(a.root,"_doc_handler_log.csv")
+    logp=a.log or os.path.join(a.root,"_docsort_log.csv")
     with open(logp,"w",encoding="utf-8",newline="") as g:
         w=csv.writer(g); w.writerow(["path","old","new","stream","subject","type","conf","source"]); w.writerows(rows)
     print(f"\n{'APPLIED' if a.apply else 'DRY-RUN'}: {n} files. log: {logp}")

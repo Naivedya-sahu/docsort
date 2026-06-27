@@ -28,11 +28,11 @@ this laptop, etc.).
 
   To remove later: `Remove-NetFirewallRule -DisplayName "LM Studio 1234"`.
 
-**3. Verify from the CLIENT machine** (the one running Doc-handler)
+**3. Verify from the CLIENT machine** (the one running docsort)
 ```bash
 python -c "import urllib.request,json;print([m['id'] for m in json.load(urllib.request.urlopen('http://HOME:1234/v1/models',timeout=8))['data']])"
 ```
-Should list the loaded models. Then `doc_handler.py ... --host HOME` works.
+Should list the loaded models. Then `docsort ... --host HOME` works.
 
 ### Notes
 - Use the **hostname** (`HOME`) or the **LAN/Tailscale IP** (e.g. `192.168.31.211`,
@@ -48,6 +48,6 @@ Should list the loaded models. Then `doc_handler.py ... --host HOME` works.
 |---|---|
 | `[warn] model server unreachable` | host down / firewall — see above. Script still runs but every file → 99UNS. |
 | Configured model not used | it wasn't loaded; auto-resolve picked a loaded one (see the `[model] ... -> ...` line). Load the model in LM Studio to force it. |
-| TUI shows boxes/garbled glyphs | terminal isn't UTF-8; run in Windows Terminal, or `set PYTHONIOENCODING=utf-8`. |
-| PDFs skipped | `pip install pymupdf`. `.docx/.pptx` → `pip install python-docx python-pptx`. |
+| GUI won't open | needs Tkinter — bundled with standard CPython on Windows; on Linux `apt install python3-tk`. |
+| PDFs skipped | reinstall so `pymupdf` is present. `.docx/.pptx` → `pip install "docsort[office]"`. |
 | Everything 99UNS | model too weak — use a 7B/8B vision model, or `--frontier claude` for hard cases. |

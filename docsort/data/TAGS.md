@@ -1,6 +1,6 @@
 # Tag Vocabulary — single source of truth
 
-Both `doc_handler.py` (validation) and the injected LLM system prompt read THIS file.
+Both `docsort` (validation) and the injected LLM system prompt read THIS file.
 Edit a list here and the change flows to the script and the model — no other edits.
 Format: inside each ```tags block, first whitespace token = the code; rest = description.
 

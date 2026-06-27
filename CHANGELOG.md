@@ -1,6 +1,40 @@
-# Changelog — Doc-handler
+# Changelog — docsort
 
 All notable changes. Newest on top.
+
+## [0.8.0] — 2026-06-27
+### Changed (breaking)
+- **Renamed the project `doc-handler` → `docsort`.** Package is now `docsort/`; commands are
+  **`docsort`** and **`docsort-gui`**; per-user data dir is `%APPDATA%\docsort\`; run-log is
+  `_docsort_log.csv`. (Earlier changelog entries below predate the rename and refer to `doc_handler`.)
+- **Repackaged as a proper installable package.** Flat modules became the `docsort` package
+  (`cli.py`, `gui.py`, `config.py`, `data/`). Install with `pip install .` from a clone; you get two
+  console commands: **`docsort`** (CLI) and **`docsort-gui`** (GUI). `run.bat` still works
+  (no-arg launches the GUI) from cmd and PowerShell.
+- **User files moved to a per-user data dir** (`%APPDATA%\docsort\`, else `~/.docsort/`),
+  seeded from bundled templates on first run: `config.json`, `TAGS.md`, `system_prompt.md`.
+  Reinstalling never overwrites your edits.
+### Added
+- **Modern dark GUI** — folder picker, toggles (copy / misc / vision / apply), frontier dropdown,
+  live log pane, and an **in-app tag-list editor** (Edit Tags). Pure Tkinter, no extra deps.
+- **`--edit-tags`** — open your `TAGS.md` in an editor from the CLI.
+- **`--copy`** — tag a `<name>COPY` of the folder, originals untouched (also a GUI toggle).
+- **`--misc` / `--no-misc`** — sweep `99UNS` (unsure) files into a `misc\` subfolder. **Default ON.**
+- **Model auto-resolution for any user** — both the text and vision tiers now pick whatever VL model
+  is loaded in LM Studio if the configured id isn't present. Portable defaults (`localhost`).
+- **Claude frontier preflight** — if `--frontier claude` but the `claude` CLI isn't on PATH, the run
+  prints a clear notice and continues locally instead of failing.
+### Removed
+- **TUI** (`tui.py`) dropped — superseded by the GUI. `rich` no longer needed.
+
+## [0.7.2] — 2026-06-27
+### Removed
+- **OpenAI / ChatGPT backend dropped entirely.** `--backend openai`, `--frontier openai`, the
+  `openai_model` config key, and the `OPENAI_API_KEY` HTTP path are gone. A ChatGPT web sub is not
+  an API, and the paid API path was unused. Backends are now key-free only: `local`, `claude`, `cmd`.
+### Changed
+- **Frontier `claude` is now hard-bound to the `haiku` model.** Removed the `--frontier-model` flag;
+  the Claude Code CLI is always invoked as `claude -p --model haiku` (standard context, sub-covered).
 
 ## [0.7.1] — 2026-06-23
 ### Fixed
