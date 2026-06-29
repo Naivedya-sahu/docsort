@@ -185,6 +185,9 @@ Run dedup FIRST so the model never reads duplicate copies.
 | `GUIDE.md` | detailed runbook — tiers, escalation, backends, flags |
 | `TROUBLESHOOTING.md` | host/firewall/port 1234 and common fixes |
 | `CHANGELOG.md` | version history |
+| `docs/MODEL-GUIDE.md` | model shortlist + LM Studio tuning + benchmark method |
+| `docs/ROADMAP.md` | shipped vs. planned vs. separate-project work |
+| `docs/design/` | design notes: `council.md`, `taxonomy-generator.md`, `gui-vision.md` |
 
 Edit tags in **`TAGS.md`** only (via **Edit Tags** / `--edit-tags`) — changes flow to both the
 script and the model.

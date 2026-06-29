@@ -2,6 +2,17 @@
 
 All notable changes. Newest on top.
 
+## [0.10.2] — 2026-06-29
+### Docs (no code changes)
+- **Design notes added** under `docs/design/`: `council.md` (the LLM Council — a *separate* project
+  exposing universal API endpoints + a central controller model; docsort will consume it as a future
+  `99UNS` tier), `taxonomy-generator.md` (sub-project: derive `TAGS.md` / `system_prompt.md` from a
+  user's folder tree, to de-personalize the taxonomy), `gui-vision.md` (modern UI + animation + low
+  cognitive load, to lower the fallback rate).
+- **`docs/ROADMAP.md`** — shipped vs. v0.11.0 candidates vs. separate projects, plus release-blocker tracking.
+- Updated `HANDOFF.md` source-data path to `D:\Sort\Backup Home PC1\Documents` (old path had vanished).
+- README "Files" table points at the new `docs/` design notes + roadmap.
+
 ## [0.10.1] — 2026-06-29
 ### Added
 - **`--skip-unknown`** (+ GUI toggle "Skip unknown") — leave `99UNS` files completely untouched:

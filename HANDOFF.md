@@ -1,7 +1,7 @@
 # docsort — Session Handoff & Project State
 
 > Single-file handoff. This is the **only** document uploaded to the next session — it is
-> self-contained. Date of handoff: **2026-06-29**. Current version: **v0.10.1**.
+> self-contained. Date of handoff: **2026-06-29**. Current version: **v0.10.2** (docs-only).
 > Repo: https://github.com/Naivedya-sahu/docsort  ·  Local path: `D:\Vault\Personal\Archive\Doc-handler`
 > (Note: the working *folder* is still named `Doc-handler` — intentionally not renamed; nothing depends on it.)
 
@@ -177,6 +177,7 @@ edit, rebuilds TAGS.md blocks in place) · **Folders** dialog (Exclude/Include l
 | **0.9.0** | Run journal (`_docsort_state.jsonl`), `--resume`, graceful pause, **server-health guard** (no more mass-mislabel on mid-run server drop), CLI `PROGRESS` emission, **live progress GUI** (bar + tok/s + ETA + Stop button). |
 | **0.10.0** | Exclude/Include folders (config + `--exclude`/`--include` + GUI Folders dialog). `DOCSORT-REPORT.md` + global `index.jsonl`; `--report`, `--stats`. **`--undo`** (real reversibility via journal `dst`). `--retry-failed`. Structured GUI tag editor (add/delete + colour). Hardened system prompt. `docs/MODEL-GUIDE.md`. Added pytest suite, `release.yml` exe pipeline. Released with `docsort-gui.exe` + `docsort.exe`. |
 | **0.10.1** | **`--skip-unknown`** toggle (CLI + GUI) — leave `99UNS` files completely untouched. Hermetic test through `main()`. |
+| **0.10.2** | **Docs only.** Design notes under `docs/design/` (council = separate universal-API project; taxonomy-generator sub-project; GUI vision). `docs/ROADMAP.md`. Source path → `D:\Sort\Backup Home PC1\Documents`. No code changes. |
 
 Tags `v0.10.0` and `v0.10.1` are released with exe assets. Git HEAD = `f7e4aa9` on `main`, clean.
 
@@ -268,10 +269,11 @@ the LM-Studio tagging step. Keeps tagging steerable and LM-Studio-only.
   its `abi3` wheel). LM Studio at `localhost:1234`.
 
 ## 10. ⚠️ Warnings / things to verify next session
-- **A source folder vanished from disk mid-session:** `C:\Users\NAVY\Documents\Backup\Backup Home PC1\Documents`
-  now 404s (`FileNotFoundError` on copytree). It was **not** deleted by docsort/Claude (only `…COPY` test
-  folders, stray logs, and a test `index.jsonl` were removed). Could be OneDrive move / manual delete —
-  **verify before any real run.**
+- **Source-data path (RESOLVED):** real-data folder is now `D:\Sort\Backup Home PC1\Documents`
+  (confirmed exists 2026-06-29). The old path `C:\Users\NAVY\Documents\Backup\Backup Home PC1\Documents`
+  had vanished mid-session (`FileNotFoundError` on copytree) — **not** deleted by docsort/Claude (only
+  `…COPY` test folders, stray logs, and a test `index.jsonl` were removed); likely OneDrive move / manual
+  delete. Use the `D:\Sort` path for any real run.
 - **LM Studio had a non-VL model loaded** (`ornith-1.0-9b`) at one point — load a **Qwen-VL** before a real
   tagging pass or the vision tier can't read images. (`ornith` is, however, a good candidate **judge** for the
   council idea.)
