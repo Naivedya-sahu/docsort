@@ -2,6 +2,11 @@
 
 All notable changes. Newest on top.
 
+## [0.10.1] — 2026-06-29
+### Added
+- **`--skip-unknown`** (+ GUI toggle "Skip unknown") — leave `99UNS` files completely untouched:
+  no rename, no misc move (journal `status=skipped`). Default off. Hermetic test added.
+
 ## [0.10.0] — 2026-06-28
 ### Added
 - **Exclude / Include folder lists** — config `exclude` / `include` (+ CLI `--exclude` / `--include`,

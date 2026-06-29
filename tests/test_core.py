@@ -46,6 +46,25 @@ def test_tag_editor_roundtrip(tmp_path):
     assert "93TEST" in su
 
 
+def test_skip_unknown(tmp_path, monkeypatch):
+    """--skip-unknown leaves 99UNS files untouched; known files still rename."""
+    monkeypatch.setenv("APPDATA", str(tmp_path))                 # isolate journal/index
+    d = tmp_path / "run"; d.mkdir()
+    (d / "unknown.pdf").write_text("x", encoding="utf-8")
+    (d / "known.pdf").write_text("x", encoding="utf-8")
+
+    def fake_classify(a, sysp, full, fn, rel):
+        return ("CW", "99UNS", "misc", "low", "text") if "unknown" in fn \
+            else ("CW", "08DIG", "notes", "high", "text")
+    monkeypatch.setattr(cli, "classify", fake_classify)
+    monkeypatch.setattr(cli, "resolve_model", lambda *a, **k: ("m", True))
+
+    cli.main([str(d), "--apply", "--skip-unknown", "--no-misc"])
+    assert (d / "unknown.pdf").exists()                          # untouched
+    assert not (d / "[CW-99UNS] unknown.pdf").exists()           # NOT renamed
+    assert (d / "[CW-08DIG] known.pdf").exists()                 # known still renamed
+
+
 def test_report_and_undo(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path))          # isolate the global index
     d = str(tmp_path / "run"); os.makedirs(os.path.join(d, "misc"))

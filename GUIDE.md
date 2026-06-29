@@ -53,6 +53,7 @@ GUI equivalent: `docsort-gui` (or `run.bat`) — folder picker + the same toggle
 | `--copy` | copy the folder to `<name>COPY` and tag the copy (originals untouched) |
 | `--apply` | rename (default is dry-run) |
 | `--misc` / `--no-misc` | sweep `99UNS` files into a `misc\` subfolder (**default ON**) |
+| `--skip-unknown` | leave `99UNS` (unknown) files completely untouched — no rename, no move |
 | `--move DEST` / `--move @archive` | relocate prefixed files into DEST/STREAM/SUBJECT |
 | `--edit-tags` | open your `TAGS.md` in an editor, then exit |
 | `--review` | aggregate log → TAG-REVIEW.md (offline) |

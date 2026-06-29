@@ -74,6 +74,7 @@ class App:
         self.misc   = tk.BooleanVar(value=True)
         self.vision = tk.BooleanVar(value=True)
         self.apply  = tk.BooleanVar(value=False)
+        self.skipunknown = tk.BooleanVar(value=False)
         self.frontier = tk.StringVar(value="none")
         self.host   = tk.StringVar(value=config.resolve_api(self._cfg))
         self.model  = tk.StringVar(value="auto")
@@ -93,7 +94,8 @@ class App:
 
         g1 = tk.Frame(opt, bg=PANEL); g1.pack(fill="x", padx=14, pady=4)
         self._check(g1, "Create copy folder (originals untouched)", self.copy).pack(side="left", padx=(0, 18))
-        self._check(g1, "Move 99UNS -> misc subfolder", self.misc).pack(side="left")
+        self._check(g1, "Move 99UNS -> misc subfolder", self.misc).pack(side="left", padx=(0, 18))
+        self._check(g1, "Skip unknown (don't touch 99UNS)", self.skipunknown).pack(side="left")
 
         g2 = tk.Frame(opt, bg=PANEL); g2.pack(fill="x", padx=14, pady=4)
         self._check(g2, "Vision model for no-text PDFs", self.vision).pack(side="left", padx=(0, 18))
@@ -207,6 +209,7 @@ class App:
         if self.apply.get():              cmd.append("--apply")
         if self.copy.get():               cmd.append("--copy")
         if not self.misc.get():           cmd.append("--no-misc")     # engine default is ON
+        if self.skipunknown.get():        cmd.append("--skip-unknown")
         if self.frontier.get() != "none": cmd += ["--frontier", self.frontier.get()]
         self.log("[gui] $ %s\n" % " ".join(cmd[2:]))
         self._run_t0 = time.time()

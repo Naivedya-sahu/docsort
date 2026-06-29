@@ -422,6 +422,8 @@ def add_args(ap):
     ap.add_argument("--copy",action="store_true",default=None,help="copy the folder to <name>COPY and tag the copy (originals untouched)")
     ap.add_argument("--misc",action=argparse.BooleanOptionalAction,default=True,
                     help="move 99UNS (unsure) files into a 'misc' subfolder (default ON; use --no-misc to disable)")
+    ap.add_argument("--skip-unknown",dest="skip_unknown",action="store_true",
+                    help="leave 99UNS (unknown) files completely untouched — no rename, no move")
     ap.add_argument("--move",default=None,help="destination root; or @archive to use config archive_root")
     ap.add_argument("--review",action="store_true",help="aggregate the run log into TAG-REVIEW.md (offline)")
     ap.add_argument("--report",action="store_true",help="(re)build DOCSORT-REPORT.md from the journal + update global index (offline)")
@@ -506,8 +508,11 @@ def main(argv=None):
                 st,su,ty,cf,src=("CW","99UNS","misc","low","error"); status="failed"; err=str(e)[:200]
             toks+=_STATS["ttoks"]
             new=f"[{st}-{su}] {base}"; rows.append((full,fn,new,st,su,ty,cf,src)); n+=1; proc+=1
+            if bool(getattr(a,"skip_unknown",False)) and su=="99UNS" and status=="done":
+                status="skipped"; skipped+=1         # leave unknown files untouched (no rename/move)
             tomisc=bool(a.misc) and su=="99UNS" and status=="done"
-            print(f"{st:5}{su:7}{ty:10}{cf:5}{src:14}{base[:46]}{'  ->misc' if tomisc else ''}{'  FAIL' if status=='failed' else ''}")
+            mark='  ->misc' if tomisc else ('  ->skip' if status=='skipped' else '')
+            print(f"{st:5}{su:7}{ty:10}{cf:5}{src:14}{base[:46]}{mark}{'  FAIL' if status=='failed' else ''}")
             cur=full
             if a.apply and status=="done":
                 if new!=fn:
