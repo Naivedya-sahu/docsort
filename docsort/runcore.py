@@ -36,10 +36,12 @@ def parse_result_row(line, streams, subjects):
         return None
     rest = toks[5:]
     skipped = "->skip" in rest
+    failed = "FAIL" in rest
     while rest and rest[-1] in _MARKERS:
         rest.pop()
     return {"stream": st, "subject": su, "type": ty, "conf": cf, "source": src,
-            "name": " ".join(rest), "tag": f"[{st}-{su}]", "skipped": skipped}
+            "name": " ".join(rest), "tag": f"[{st}-{su}]", "skipped": skipped,
+            "failed": failed}
 
 
 def build_run_cmd(opts, python=None, folder=None):

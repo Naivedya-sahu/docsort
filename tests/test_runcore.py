@@ -28,12 +28,25 @@ def test_parse_result_row_basic():
     assert r["type"] == "notes" and r["conf"] == "high" and r["source"] == "text"
     assert r["name"] == "control_bode_notes.pdf"
     assert r["tag"] == "[CW-08DIG]" and r["skipped"] is False
+    assert r["failed"] is False
+
+
+def test_parse_result_row_multiword_filename():
+    line = "CW 08DIG notes high text my long filename.pdf"
+    r = runcore.parse_result_row(line, STREAMS, SUBJECTS)
+    assert r["name"] == "my long filename.pdf"
 
 
 def test_parse_result_row_strips_markers():
     line = "GATE 99UNS  pyq       high text          gate_2024_ec_paper.pdf  ->skip"
     r = runcore.parse_result_row(line, STREAMS, SUBJECTS)
     assert r["name"] == "gate_2024_ec_paper.pdf" and r["skipped"] is True
+
+
+def test_parse_result_row_failed_flag():
+    line = "CW 99UNS misc low error broken.pdf  FAIL"
+    r = runcore.parse_result_row(line, STREAMS, SUBJECTS)
+    assert r["failed"] is True and r["name"] == "broken.pdf"
 
 
 def test_parse_result_row_rejects_non_rows():
