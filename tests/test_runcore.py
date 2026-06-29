@@ -40,3 +40,23 @@ def test_parse_result_row_rejects_non_rows():
     assert runcore.parse_result_row("PROGRESS 1/2 done=1 failed=0", STREAMS, SUBJECTS) is None
     assert runcore.parse_result_row("[model] note", STREAMS, SUBJECTS) is None
     assert runcore.parse_result_row("ZZ 08DIG notes high text x.pdf", STREAMS, SUBJECTS) is None
+
+
+def test_build_run_cmd_defaults():
+    cmd = runcore.build_run_cmd({}, python="PY", folder="F")
+    assert cmd == ["PY", "-m", "docsort.cli", "F"]
+
+
+def test_build_run_cmd_all_toggles():
+    opts = {"host": "HOME", "model": "qwen", "vision": True, "apply": True,
+            "copy": True, "misc": False, "skip_unknown": True, "frontier": "claude"}
+    cmd = runcore.build_run_cmd(opts, python="PY", folder="F")
+    assert cmd == ["PY", "-m", "docsort.cli", "F",
+                   "--host", "HOME", "--model", "qwen", "--vision-model", "qwen",
+                   "--vision", "--apply", "--copy", "--no-misc",
+                   "--skip-unknown", "--frontier", "claude"]
+
+
+def test_build_run_cmd_model_auto_and_misc_default():
+    cmd = runcore.build_run_cmd({"model": "auto", "misc": True}, python="PY", folder="F")
+    assert "--model" not in cmd and "--no-misc" not in cmd

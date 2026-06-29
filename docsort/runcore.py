@@ -40,3 +40,28 @@ def parse_result_row(line, streams, subjects):
         rest.pop()
     return {"stream": st, "subject": su, "type": ty, "conf": cf, "source": src,
             "name": " ".join(rest), "tag": f"[{st}-{su}]", "skipped": skipped}
+
+
+def build_run_cmd(opts, python=None, folder=None):
+    """Build the `python -m docsort.cli <folder> ...` command from UI options.
+    Mirrors the existing gui.run() flag mapping exactly. `misc` defaults ON."""
+    cmd = [python or sys.executable, "-m", "docsort.cli", folder]
+    if opts.get("host"):
+        cmd += ["--host", opts["host"]]
+    model = opts.get("model", "auto")
+    if model and model != "auto":
+        cmd += ["--model", model, "--vision-model", model]
+    if opts.get("vision"):
+        cmd.append("--vision")
+    if opts.get("apply"):
+        cmd.append("--apply")
+    if opts.get("copy"):
+        cmd.append("--copy")
+    if not opts.get("misc", True):
+        cmd.append("--no-misc")
+    if opts.get("skip_unknown"):
+        cmd.append("--skip-unknown")
+    fr = opts.get("frontier", "none")
+    if fr and fr != "none":
+        cmd += ["--frontier", fr]
+    return cmd
