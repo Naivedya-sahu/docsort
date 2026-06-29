@@ -82,7 +82,7 @@ class RunController:
         self._thread = None
 
     def start(self, cmd, cwd):
-        if self.proc:
+        if self._thread is not None and self._thread.is_alive():
             return
         self._thread = threading.Thread(target=self._run, args=(cmd, cwd), daemon=True)
         self._thread.start()
@@ -102,7 +102,7 @@ class RunController:
                 row = parse_result_row(s, self.streams, self.subjects)
                 if row is not None:
                     self.on_event(("file", row)); continue
-                self.on_event(("log", line))
+                self.on_event(("log", s))
             self.proc.wait()
         except Exception as e:
             self.on_event(("log", f"[gui] error: {e}\n"))
@@ -111,9 +111,10 @@ class RunController:
             self.on_event(("done", None))
 
     def stop(self):
-        if self.proc:
+        p = self.proc
+        if p:
             try:
-                self.proc.terminate()
+                p.terminate()
             except Exception:
                 pass
 

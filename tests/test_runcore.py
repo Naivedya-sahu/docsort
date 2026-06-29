@@ -1,3 +1,5 @@
+import sys as _sys, time as _time
+
 from docsort import runcore
 
 
@@ -75,9 +77,6 @@ def test_build_run_cmd_model_auto_and_misc_default():
     assert "--model" not in cmd and "--no-misc" not in cmd
 
 
-import sys as _sys, time as _time
-
-
 def test_run_controller_emits_events():
     emitter = ("import sys;"
                "print('starting');"
@@ -101,3 +100,16 @@ def test_run_controller_emits_events():
     fil = next(e[1] for e in events if e[0] == "file")
     assert fil["name"] == "a.pdf"
     assert not any("MuPDF error" in (e[1] if isinstance(e[1], str) else "") for e in events)
+
+
+def test_run_controller_running_flag_and_stop():
+    cmd = [_sys.executable, "-c", "import time; time.sleep(0.3); print('done')"]
+    ctrl = runcore.RunController({"CW"}, {"08DIG"}, on_event=lambda e: None)
+    assert ctrl.running is False
+    ctrl.start(cmd, cwd=".")
+    ctrl.stop()
+    for _ in range(100):
+        if not ctrl.running:
+            break
+        _time.sleep(0.05)
+    assert ctrl.running is False
