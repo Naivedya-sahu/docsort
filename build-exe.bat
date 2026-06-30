@@ -14,7 +14,9 @@ if "%VER%"=="" set "VER=0.0.0"
 
 echo.
 echo === Building GUI exe (flet pack, v%VER%) ===
-"%FLET%" pack scripts\run_gui.py --name docsort-gui --product-name docsort --product-version %VER% -y
+REM --add-data bundles docsort/data (TAGS.md, prompt, config template);
+REM --paths=. lets PyInstaller find the docsort package even on an editable install.
+"%FLET%" pack scripts\run_gui.py --name docsort-gui --product-name docsort --product-version %VER% -y --add-data "docsort\data;docsort\data" --pyinstaller-build-args=--paths=.
 if errorlevel 1 goto :err
 
 echo.

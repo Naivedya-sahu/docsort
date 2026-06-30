@@ -77,20 +77,6 @@ def _feed_row(p: dict) -> "ft.Control":
     )
 
 
-def _pick_folder(page: "ft.Page", field: "ft.TextField") -> None:
-    """Open a native directory picker (async in Flet 0.85+) and write the path into *field*."""
-    async def _go() -> None:
-        fp = ft.FilePicker()
-        page.overlay.append(fp)
-        page.update()
-        path = await fp.get_directory_path()
-        if path:
-            field.value = path
-            page.update()
-
-    page.run_task(_go)
-
-
 def _metric(label: str, value_ctrl: "ft.Text") -> "ft.Container":
     return ft.Container(
         bgcolor=PANEL, border_radius=8, padding=10, expand=True,
@@ -106,14 +92,25 @@ def _run_view(page: "ft.Page") -> "ft.Control":
     # ---- input controls ----
     folder = ft.TextField(label="Folder", color=FG, expand=True,
                           value=str(cfg.get("last_folder") or ""))
-    browse = ft.IconButton(ft.Icons.FOLDER_OPEN, tooltip="Browse",
-                           on_click=lambda _e: _pick_folder(page, folder))
+    folder_picker = ft.FilePicker()          # FilePicker is a Service in Flet 0.85
+    page.services.append(folder_picker)
+
+    def _browse(_e):
+        async def _go():
+            path = await folder_picker.get_directory_path()
+            if path:
+                folder.value = path
+                page.update()
+        page.run_task(_go)
+
+    browse = ft.IconButton(ft.Icons.FOLDER_OPEN, tooltip="Browse", on_click=_browse)
     host = ft.TextField(label="Host (name or URL, blank = default)", color=FG, width=320)
     model = ft.Dropdown(label="Model", width=240, value="auto",
-                        options=[ft.dropdown.Option("auto")])
+                        options=[ft.dropdown.Option(key="auto", text="auto")])
     refresh = ft.IconButton(ft.Icons.REFRESH, tooltip="Refresh models")
     frontier = ft.Dropdown(label="Frontier", width=160, value="none",
-                           options=[ft.dropdown.Option("none"), ft.dropdown.Option("claude")])
+                           options=[ft.dropdown.Option(key="none", text="none"),
+                                    ft.dropdown.Option(key="claude", text="claude")])
     t_vision = ft.Switch(label="Vision", value=False)
     t_apply = ft.Switch(label="Apply (rename)", value=False)
     t_copy = ft.Switch(label="Work on a copy", value=False)
@@ -155,15 +152,25 @@ def _run_view(page: "ft.Page") -> "ft.Control":
 
     # ---- model refresh ----
     def do_refresh(_e=None) -> None:
-        api = config.resolve_api(cfg, host.value.strip() or None)
-        try:
-            ms = available_models(api)
-        except Exception:
-            ms = []
-        model.options = [ft.dropdown.Option("auto")] + [ft.dropdown.Option(m) for m in ms]
-        if model.value not in {o.key for o in model.options}:
-            model.value = "auto"
-        page.update()
+        host_val = host.value.strip() or None
+
+        def work() -> None:                       # network off the UI thread
+            api = config.resolve_api(cfg, host_val)
+            try:
+                ms = available_models(api)
+            except Exception:
+                ms = []
+
+            def upd() -> None:
+                model.options = ([ft.dropdown.Option(key="auto", text="auto")]
+                                 + [ft.dropdown.Option(key=m, text=m) for m in ms])
+                if model.value not in {o.key for o in model.options}:
+                    model.value = "auto"
+                page.update()
+
+            page.run_thread(upd)
+
+        threading.Thread(target=work, daemon=True).start()
 
     refresh.on_click = do_refresh
     host.on_blur = do_refresh
@@ -384,6 +391,9 @@ def _folders_view(page: "ft.Page") -> "ft.Control":
     except Exception:
         data = {}
 
+    picker = ft.FilePicker()                  # FilePicker is a Service in Flet 0.85
+    page.services.append(picker)
+
     def make_list(key: str, label: str, colour: str):
         items = list(data.get(key) or [])
         lv = ft.ListView(expand=True, spacing=2)
@@ -400,10 +410,7 @@ def _folders_view(page: "ft.Page") -> "ft.Control":
 
         def add(_e):
             async def _go():
-                fp = ft.FilePicker()
-                page.overlay.append(fp)
-                page.update()
-                path = await fp.get_directory_path()
+                path = await picker.get_directory_path()
                 if path:
                     items.append(path)
                     render()

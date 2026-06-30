@@ -17,7 +17,7 @@ jobs:
       - name: Install
         run: pip install ".[gui]" pyinstaller flet
       - name: Build GUI exe (Flet)
-        run: flet pack scripts/run_gui.py --name docsort-gui --product-name docsort
+        run: flet pack scripts/run_gui.py --name docsort-gui --product-name docsort --add-data "docsort/data;docsort/data" --pyinstaller-build-args=--paths=. -y
       - name: Build CLI exe
         run: pyinstaller --onefile --console --name docsort --collect-all docsort scripts/run_cli.py
       - name: Publish release
