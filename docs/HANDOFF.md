@@ -73,7 +73,8 @@ build-exe.bat                      # local exe build
 .github/workflows/ci.yml, release.yml
 docs/   — GUIDE.md CHANGELOG.md HANDOFF.md TROUBLESHOOTING.md MODEL-GUIDE.md ROADMAP.md
 docs/archive/  — design notes (council, taxonomy-generator, gui-vision), the spec + build plan, html mockups
-ROOT (only):  README.md  LICENSE  pyproject.toml  MANIFEST.in  requirements.txt  run.bat  build-exe.bat  run_cli.py  run_gui.py  docsort.ico
+ROOT (only):  README.md  LICENSE  pyproject.toml  MANIFEST.in  requirements.txt  run.bat  build-exe.bat  run_cli.py  run_gui.py
+docsort/docsort.ico  — app icon, wired into the exe build via flet pack -i / pyinstaller --icon
 ```
 > Doc layout: only `README.md` lives at the repo root; all other docs are under `docs/`. `.git`, `.github`,
 > `.venv`, `.planning`, `.claude`, `.pytest_cache`, and `docsort.egg-info` carry the Windows hidden attribute

@@ -17,9 +17,9 @@ jobs:
       - name: Install
         run: pip install ".[gui]" pyinstaller flet
       - name: Build GUI exe (Flet)
-        run: flet pack run_gui.py --name docsort-gui --product-name docsort --add-data "docsort/data;docsort/data" --pyinstaller-build-args=--paths=. -y
+        run: flet pack run_gui.py --name docsort-gui --product-name docsort -i docsort/docsort.ico --add-data "docsort/data;docsort/data" --pyinstaller-build-args=--paths=. -y
       - name: Build CLI exe
-        run: pyinstaller --onefile --console --name docsort --collect-all docsort run_cli.py
+        run: pyinstaller --onefile --console --name docsort --icon docsort/docsort.ico --collect-all docsort run_cli.py
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
