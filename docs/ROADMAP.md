@@ -32,6 +32,14 @@ engine or behaviour changes**; the Flet UI drives the existing CLI via subproces
   CPU-capable text model via LM Studio. De-personalizes the taxonomy (public blocker #2). Designed and
   deferred; its wizard dialog plugs into the Flet shell. See
   [`design/taxonomy-generator.md`](design/taxonomy-generator.md).
+- **Apply-from-journal (fast apply)** — reuse a prior dry-run's `_docsort_state.jsonl` decisions to perform
+  only the renames/moves, calling the model zero times (the inverse of `--undo`). Today an `--apply` run
+  re-classifies from scratch, so applying audited results costs the same as the dry-run. New `--apply-journal`
+  flag + a GUI "Apply audited results" action. Engine change. High value — matches the dry-run → review →
+  apply workflow.
+- **Sub-file progress** — surface intra-file progress while the model works (e.g. LM Studio prompt-eval %).
+  Not available via the OpenAI HTTP API docsort uses (only final `usage`); would need `stream:true` (limited
+  value — tiny generation) or tailing LM Studio's log (fragile). Low priority.
 - **Engine debt** — transient single-retry (one retry on an empty model reply before `99UNS`), GUI config
   persistence (Host/Model fields), and the in-process engine boundary (replace subprocess + line parsing).
 
