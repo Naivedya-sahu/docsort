@@ -19,7 +19,7 @@ try:
 except ImportError:          # CLI-only install — no flet wheel
     ft = None  # type: ignore[assignment]
 
-from . import config
+from . import config, tagsio
 from .cli import available_models, load_tags
 from .runcore import RunController, build_run_cmd
 
@@ -132,6 +132,13 @@ def _run_view(page: "ft.Page") -> "ft.Control":
     feed = ft.ListView(expand=True, spacing=2, padding=4, auto_scroll=True)
     status = ft.Text("idle", color=MUTED)
 
+    # verbose live log (collapsed by default — full parity with the old GUI)
+    log = ft.ListView(expand=True, spacing=1, padding=6, auto_scroll=True)
+
+    def log_line(text, color=MUTED):
+        log.controls.append(ft.Text(str(text).rstrip("\n"), color=color, size=11,
+                                    font_family="Consolas", selectable=True))
+
     state = {"t0": None, "skipped": 0}
 
     # ---- model refresh ----
@@ -164,11 +171,16 @@ def _run_view(page: "ft.Page") -> "ft.Control":
                 remaining.value = "~" + (_fmt_mmss(int(payload["eta"])) if payload["eta"].isdigit() else "—")
                 if state["t0"]:
                     elapsed.value = _fmt_mmss(time.time() - state["t0"])
+                log_line(f"[progress] {payload['i']}/{payload['n']} done={payload['done']} "
+                         f"failed={payload['failed']} tps={payload['tps']} eta={payload['eta']}s")
             elif kind == "file":
                 if payload.get("skipped"):
                     state["skipped"] += 1
                     c_skip.value = str(state["skipped"])
                 feed.controls.append(_feed_row(payload))
+                log_line(f"{payload['tag']} {payload['source']:14} {payload['name']}", color=FG)
+            elif kind == "log":
+                log_line(payload)
             elif kind == "done":
                 status.value = "done"
                 status.color = OK
@@ -176,6 +188,7 @@ def _run_view(page: "ft.Page") -> "ft.Control":
                 stop_btn.disabled = True
                 if state["t0"]:
                     elapsed.value = _fmt_mmss(time.time() - state["t0"])
+                log_line("[done]", color=OK)
             page.update()
 
         page.run_thread(apply)
@@ -195,6 +208,7 @@ def _run_view(page: "ft.Page") -> "ft.Control":
                 "skip_unknown": t_skip.value, "frontier": frontier.value}
         cmd = build_run_cmd(opts, python=sys.executable, folder=f)
         feed.controls.clear()
+        log.controls.clear()
         state["t0"] = time.time()
         state["skipped"] = 0
         pct.value = "0%"
@@ -256,15 +270,207 @@ def _run_view(page: "ft.Page") -> "ft.Control":
         spacing=10,
     )
 
-    return ft.Column(
+    log_panel = ft.ExpansionTile(
+        title=ft.Text("Log (verbose)", color=MUTED, size=12),
+        expanded=False,
+        controls=[ft.Container(bgcolor=ENTRY, border_radius=8, padding=4,
+                               height=180, content=log)],
+    )
+
+    view = ft.Column(
         [
             controls,
             hero,
             ft.Container(bgcolor=PANEL, border_radius=12, padding=6, expand=True, content=feed),
+            log_panel,
         ],
         spacing=14,
         expand=True,
     )
+    view.data = folder           # expose the folder field to the Reports view
+    return view
+
+
+# ---------------------------------------------------------------------------
+# Tags view (structured editor over tagsio)
+# ---------------------------------------------------------------------------
+
+def _tags_view(page: "ft.Page") -> "ft.Control":
+    path = config.tags_path()
+    text = open(path, encoding="utf-8").read()
+    palette = {"STREAMS": ACCENT, "SUBJECTS": "#5b8cff", "TYPES": OK}
+    cols: dict = {}
+
+    def make_col(name: str) -> "ft.Container":
+        lv = ft.ListView(expand=True, spacing=4)
+        fields: list = []
+        holder: dict = {}
+
+        def mk_row(value: str) -> "ft.Row":
+            tf = ft.TextField(value=value, color=FG, text_size=13, expand=True)
+            row = ft.Row(
+                [tf, ft.IconButton(ft.Icons.DELETE, icon_color=FAIL,
+                                   on_click=lambda e: (lv.controls.remove(holder[tf]),
+                                                       fields.remove(tf), page.update()))],
+                spacing=4,
+            )
+            holder[tf] = row
+            fields.append(tf)
+            return row
+
+        for it in tagsio.tag_block(text, name):
+            lv.controls.append(mk_row(it))
+
+        def add(_e):
+            lv.controls.append(mk_row(""))
+            page.update()
+
+        cols[name] = fields
+        return ft.Container(
+            bgcolor=PANEL, border_radius=12, padding=10, expand=True,
+            content=ft.Column(
+                [ft.Text(name, color=palette[name], weight=ft.FontWeight.W_500),
+                 lv, ft.TextButton("+ add", on_click=add)],
+                spacing=8, expand=True),
+        )
+
+    col_row = ft.Row([make_col("STREAMS"), make_col("SUBJECTS"), make_col("TYPES")],
+                     expand=True, spacing=10)
+    status = ft.Text("", color=OK)
+
+    def save(_e):
+        new = text
+        for n in ("STREAMS", "SUBJECTS", "TYPES"):
+            lines = [tf.value.rstrip() for tf in cols[n] if tf.value.strip()]
+            new = tagsio.replace_block(new, n, lines)
+        try:
+            open(path, "w", encoding="utf-8").write(new)
+            status.value, status.color = "tags saved", OK
+        except Exception as e:
+            status.value, status.color = f"save failed: {e}", FAIL
+        page.update()
+
+    return ft.Column(
+        [ft.Text("First token on each line = the code.", color=MUTED, size=12),
+         col_row,
+         ft.Row([ft.FilledButton("Save", on_click=save, style=ft.ButtonStyle(bgcolor=ACCENT)), status])],
+        spacing=12, expand=True)
+
+
+# ---------------------------------------------------------------------------
+# Folders view (exclude / include → config.json)
+# ---------------------------------------------------------------------------
+
+def _folders_view(page: "ft.Page") -> "ft.Control":
+    import json
+    cfgp = config.config_path()
+    try:
+        data = json.load(open(cfgp, encoding="utf-8"))
+    except Exception:
+        data = {}
+
+    def make_list(key: str, label: str, colour: str):
+        items = list(data.get(key) or [])
+        lv = ft.ListView(expand=True, spacing=2)
+
+        def render():
+            lv.controls.clear()
+            for it in list(items):
+                lv.controls.append(ft.Row(
+                    [ft.Text(it, color=FG, size=12, expand=True, no_wrap=True,
+                             overflow=ft.TextOverflow.ELLIPSIS),
+                     ft.IconButton(ft.Icons.DELETE, icon_color=FAIL,
+                                   on_click=lambda e, v=it: (items.remove(v), render(), page.update()))],
+                    spacing=4))
+
+        def add(_e):
+            def on_result(ev):
+                if getattr(ev, "path", None):
+                    items.append(ev.path)
+                    render()
+                    page.update()
+            fp = ft.FilePicker(on_result=on_result)
+            page.overlay.append(fp)
+            page.update()
+            fp.get_directory_path()
+
+        render()
+        box = ft.Container(
+            bgcolor=PANEL, border_radius=12, padding=10, expand=True,
+            content=ft.Column(
+                [ft.Text(label, color=colour, weight=ft.FontWeight.W_500), lv,
+                 ft.TextButton("+ add folder", on_click=add)],
+                spacing=8, expand=True))
+        return box, items
+
+    ex_box, ex_items = make_list("exclude", "Exclude", FAIL)
+    in_box, in_items = make_list("include", "Include", OK)
+    status = ft.Text("", color=OK)
+
+    def save(_e):
+        data["exclude"], data["include"] = list(ex_items), list(in_items)
+        try:
+            json.dump(data, open(cfgp, "w", encoding="utf-8"), indent=2)
+            status.value, status.color = "folders saved", OK
+        except Exception as e:
+            status.value, status.color = f"save failed: {e}", FAIL
+        page.update()
+
+    return ft.Column(
+        [ft.Text("Exclude = skip these. Include = if non-empty, ONLY these.", color=MUTED, size=12),
+         ft.Row([ex_box, in_box], expand=True, spacing=10),
+         ft.Row([ft.FilledButton("Save", on_click=save, style=ft.ButtonStyle(bgcolor=ACCENT)), status])],
+        spacing=12, expand=True)
+
+
+# ---------------------------------------------------------------------------
+# Reports + Stats views
+# ---------------------------------------------------------------------------
+
+def _reports_view(page: "ft.Page", folder_getter) -> "ft.Control":
+    body = ft.Text("", selectable=True, color=FG, font_family="Consolas", size=12)
+    info = ft.Text("", color=MUTED, size=12)
+
+    def load(_e=None):
+        folder = (folder_getter() or "").strip()
+        cands = [os.path.join(folder, "DOCSORT-REPORT.md"),
+                 os.path.join(folder + "COPY", "DOCSORT-REPORT.md")]
+        path = next((p for p in cands if folder and os.path.isfile(p)), None)
+        if not path:
+            info.value = "No DOCSORT-REPORT.md yet — run a tagging pass first."
+            body.value = ""
+        else:
+            info.value = path
+            body.value = open(path, encoding="utf-8").read()
+        page.update()
+
+    return ft.Column(
+        [ft.Row([ft.FilledButton("Load report", on_click=load), info]),
+         ft.Container(bgcolor=PANEL, border_radius=12, padding=12, expand=True,
+                      content=ft.Column([body], scroll=ft.ScrollMode.AUTO, expand=True))],
+        spacing=12, expand=True)
+
+
+def _stats_view(page: "ft.Page") -> "ft.Control":
+    import json
+    import collections
+    idx = os.path.join(config.user_dir(), "index.jsonl")
+    lines = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO, expand=True)
+    if not os.path.isfile(idx):
+        lines.controls.append(ft.Text("No runs yet — run a tagging pass first.", color=MUTED))
+    else:
+        runs = [json.loads(l) for l in open(idx, encoding="utf-8") if l.strip()]
+        files = sum(int(r.get("n", 0) or 0) for r in runs)
+        agg: "collections.Counter" = collections.Counter()
+        for r in runs:
+            agg.update(r.get("by") or {})
+        lines.controls.append(ft.Text(f"{len(runs)} runs · {files} files tagged",
+                                      color=FG, size=16, weight=ft.FontWeight.W_500))
+        for k, c in agg.most_common(20):
+            lines.controls.append(ft.Text(f"{k}  ×{c}", color=MUTED, size=13, font_family="Consolas"))
+
+    return ft.Column([ft.Text("Lifetime stats", color=MUTED, size=12), lines],
+                     spacing=12, expand=True)
 
 
 # ---------------------------------------------------------------------------
@@ -284,17 +490,31 @@ def _build(page: "ft.Page") -> None:
     page.window.min_width = 720
     page.window.min_height = 560
 
-    # Build the Run view once and reuse it across nav switches.
+    # Build the Run view once; other views are built lazily on first visit.
     run_view = _run_view(page)
-
     content = ft.Container(expand=True, padding=18, content=run_view)
+    cache: dict = {0: run_view}
+
+    def _folder_value() -> str:
+        fld = getattr(run_view, "data", None)
+        return fld.value if fld is not None else ""
+
+    def _make_view(idx: int) -> "ft.Control":
+        if idx == 1:
+            return _tags_view(page)
+        if idx == 2:
+            return _folders_view(page)
+        if idx == 3:
+            return _reports_view(page, _folder_value)
+        if idx == 4:
+            return _stats_view(page)
+        return run_view
 
     def _on_nav_change(e: "ft.ControlEvent") -> None:
         idx: int = e.control.selected_index
-        if idx == 0:
-            content.content = run_view
-        else:
-            content.content = ft.Text(_SECTION_NAMES[idx], color=FG, size=18)
+        if idx not in cache:
+            cache[idx] = _make_view(idx)
+        content.content = cache[idx]
         page.update()
 
     rail = ft.NavigationRail(
