@@ -84,7 +84,6 @@ def _metric(label: str, value_ctrl: "ft.Text") -> "ft.Container":
     )
 
 
-# NOTE: not yet wired into _run_view/_tags_view — see Task 2 of the GUI consolidation plan.
 def _build_toggles() -> dict:
     """The 5 run-option switches, built once and shared between the Run view
     (reads .value to build CLI opts) and the Tags view (renders them) so a
@@ -112,8 +111,11 @@ def _build_opts(host: "ft.TextField", model: "ft.Dropdown", toggles: dict, front
     }
 
 
-def _run_view(page: "ft.Page") -> "ft.Control":
-    """Build the Run view: controls, progress hero, counters, live feed."""
+def _run_view(page: "ft.Page", toggles: dict) -> "ft.Control":
+    """Build the Run view: controls, progress hero, counters, live feed.
+
+    `toggles` is the shared dict from `_build_toggles()` — same objects the
+    Tags view renders, so this just reads `.value` off them."""
     streams, subjects, _types = load_tags(config.tags_path())
     cfg = config.load_config()
 
@@ -139,12 +141,11 @@ def _run_view(page: "ft.Page") -> "ft.Control":
     frontier = ft.Dropdown(label="Frontier", width=160, value="none",
                            options=[ft.dropdown.Option(key="none", text="none"),
                                     ft.dropdown.Option(key="claude", text="claude")])
-    # TODO(task-2): replace with shared _build_toggles() — see docs/superpowers/plans/2026-07-01-gui-stats-consolidation.md
-    t_vision = ft.Switch(label="Vision", value=False)
-    t_apply = ft.Switch(label="Apply (rename)", value=False)
-    t_copy = ft.Switch(label="Work on a copy", value=False)
-    t_misc = ft.Switch(label="Move 99UNS → misc", value=True)
-    t_skip = ft.Switch(label="Skip unknown", value=False)
+    t_vision = toggles["vision"]
+    t_apply = toggles["apply"]
+    t_copy = toggles["copy"]
+    t_misc = toggles["misc"]
+    t_skip = toggles["skip"]
 
     # ---- progress hero ----
     pct = ft.Text("0%", size=42, weight=ft.FontWeight.W_500, color=FG)
@@ -253,9 +254,7 @@ def _run_view(page: "ft.Page") -> "ft.Control":
             status.color = FAIL
             page.update()
             return
-        opts = {"host": host.value.strip(), "model": model.value, "vision": t_vision.value,
-                "apply": t_apply.value, "copy": t_copy.value, "misc": t_misc.value,
-                "skip_unknown": t_skip.value, "frontier": frontier.value}
+        opts = _build_opts(host, model, toggles, frontier)
         cmd = build_run_cmd(opts, python=sys.executable, folder=f)
         feed.controls.clear()
         log.controls.clear()
@@ -340,7 +339,6 @@ def _run_view(page: "ft.Page") -> "ft.Control":
         [
             ft.Row([folder, browse]),
             ft.Row([host, model, refresh, frontier], wrap=True, vertical_alignment=ft.CrossAxisAlignment.END),
-            ft.Row([t_vision, t_apply, t_copy, t_misc, t_skip], wrap=True),
             ft.Row([run_btn, apply_btn, stop_btn, status]),
         ],
         spacing=10,

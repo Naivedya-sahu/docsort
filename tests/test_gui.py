@@ -63,3 +63,14 @@ def test_build_opts_reads_toggle_values():
         "skip_unknown": False,
         "frontier": "claude",
     }
+
+
+def test_run_view_takes_shared_toggles_and_has_no_inline_switches():
+    page = _stub_page()
+    toggles = gui._build_toggles()
+    view = gui._run_view(page, toggles)
+    found_switches = [c for c in _walk(view) if isinstance(c, ft.Switch)]
+    assert found_switches == [], (
+        "Run view should no longer render the 5 toggle switches inline — "
+        "they moved to the Tags view"
+    )
