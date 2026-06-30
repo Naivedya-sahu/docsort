@@ -36,12 +36,11 @@ def test_decide_and_proposal():
 
 
 def test_tag_editor_roundtrip(tmp_path):
-    pytest.importorskip("tkinter")
-    from docsort.gui import App
+    from docsort import tagsio
     txt = open(config._bundled("TAGS.md"), encoding="utf-8").read()
-    subs = App._tag_block(txt, "SUBJECTS")
+    subs = tagsio.tag_block(txt, "SUBJECTS")
     subs.append("93TEST  a new subject")
-    new = App._replace_block(txt, "SUBJECTS", subs)
+    new = tagsio.replace_block(txt, "SUBJECTS", subs)
     _, su, _ = cli.load_tags(_tmp(new, tmp_path))
     assert "93TEST" in su
 

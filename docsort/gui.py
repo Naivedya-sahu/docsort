@@ -1,428 +1,575 @@
 #!/usr/bin/env python3
-"""
-docsort.gui — modern dark Tkinter front-end.
+"""docsort.gui — Flet front end (visual overhaul, v0.11.0+).
 
-Pick a folder, set toggles, hit Run. The classifier runs as a subprocess
-(`python -m docsort.cli ...`) using the same interpreter, so it inherits the
-environment that launched the GUI (e.g. the project .venv with pymupdf). Output
-streams live into the dark log pane. An in-app editor lets you edit the tag lists.
+Replaces the Tkinter UI with a modern Flet app. The classifier engine still
+runs as a ``python -m docsort.cli ...`` subprocess via
+:class:`~docsort.runcore.RunController`, so this module is presentation-only.
 
-  docsort-gui          (or: run.bat gui)
-Tkinter ships with standard CPython on Windows; no extra install.
+  docsort-gui            (or: python -m docsort.gui)
+Requires the [gui] extra:  pip install "docsort[gui]"
 """
 from __future__ import annotations
-import os, sys, re, time, subprocess, threading, queue
-import tkinter as tk
-from tkinter import filedialog, messagebox
+
+import os
+import sys
+import time
+import threading
 
 try:
-    from . import config
-    from .cli import available_models
-except ImportError:
-    import config  # loose-script fallback
-    from cli import available_models
+    import flet as ft
+except ImportError:          # CLI-only install — no flet wheel
+    ft = None  # type: ignore[assignment]
 
-# repo root / site-packages dir that contains the docsort package — so `-m docsort.cli` resolves
+from . import config, tagsio
+from .cli import available_models, load_tags
+from .runcore import RunController, build_run_cmd
+
+# repo root / site-packages dir so `-m docsort.cli` resolves from subprocess
 PKG_PARENT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# ---- dark palette ----
-BG      = "#1b1b27"
-PANEL   = "#232334"
-PANEL2  = "#2a2a3d"
-FG      = "#e6e6ef"
-MUTED   = "#9aa0b4"
-ACCENT  = "#7c5cff"
-ACCENT2 = "#5b8cff"
-OK      = "#3ddc84"
-ENTRY   = "#15151f"
-FONT    = ("Segoe UI", 10)
-FONT_B  = ("Segoe UI Semibold", 11)
-MONO    = ("Consolas", 9)
+# ---------------------------------------------------------------------------
+# Palette  (Discord-like dark — reused by later view modules)
+# ---------------------------------------------------------------------------
+BG     = "#1b1b27"
+PANEL  = "#232334"
+PANEL2 = "#2a2a3d"
+ENTRY  = "#15151f"
+FG     = "#e6e6ef"
+MUTED  = "#9aa0b4"
+ACCENT = "#7c5cff"
+OK     = "#3ddc84"
+FAIL   = "#e0715e"
+
+# Nav section names (index matches NavigationRail selected_index)
+_SECTION_NAMES = ["Run", "Tags", "Folders", "Reports", "Stats"]
 
 
-class App:
-    def __init__(self, root):
-        self.root = root
-        self.q = queue.Queue()
-        self.proc = None
-        self._cfg = config.load_config()
-        root.title("docsort")
-        root.geometry("820x600")
-        root.configure(bg=BG)
-        root.minsize(640, 480)
+# ---------------------------------------------------------------------------
+# Run view
+# ---------------------------------------------------------------------------
 
-        # --- header ---
-        head = tk.Frame(root, bg=BG)
-        head.pack(fill="x", padx=18, pady=(16, 6))
-        tk.Label(head, text="docsort", bg=BG, fg=FG, font=("Segoe UI Semibold", 18)).pack(side="left")
-        tk.Label(head, text="local-LLM document tagger", bg=BG, fg=MUTED, font=FONT).pack(side="left", padx=10, pady=(8, 0))
+def _fmt_mmss(seconds: int) -> str:
+    seconds = max(0, int(seconds))
+    return f"{seconds // 60}:{seconds % 60:02d}"
 
-        # --- folder card ---
-        card = self._card(root)
-        row = tk.Frame(card, bg=PANEL); row.pack(fill="x", padx=14, pady=12)
-        tk.Label(row, text="Folder", bg=PANEL, fg=MUTED, font=FONT, width=7, anchor="w").pack(side="left")
-        self.folder = tk.StringVar()
-        ent = tk.Entry(row, textvariable=self.folder, bg=ENTRY, fg=FG, insertbackground=FG,
-                       relief="flat", font=FONT, highlightthickness=1, highlightbackground=PANEL2,
-                       highlightcolor=ACCENT)
-        ent.pack(side="left", fill="x", expand=True, ipady=6, padx=(0, 8))
-        self._btn(row, "Browse", self.browse, accent=False).pack(side="left")
 
-        # --- options card ---
-        opt = self._card(root)
-        self.copy   = tk.BooleanVar(value=True)
-        self.misc   = tk.BooleanVar(value=True)
-        self.vision = tk.BooleanVar(value=True)
-        self.apply  = tk.BooleanVar(value=False)
-        self.skipunknown = tk.BooleanVar(value=False)
-        self.frontier = tk.StringVar(value="none")
-        self.host   = tk.StringVar(value=config.resolve_api(self._cfg))
-        self.model  = tk.StringVar(value="auto")
+def _feed_row(p: dict) -> "ft.Control":
+    """One completed-file row for the live feed."""
+    if p.get("failed"):
+        icon, icol = ft.Icons.ALERT_TRIANGLE if hasattr(ft.Icons, "ALERT_TRIANGLE") else ft.Icons.ERROR_OUTLINE, FAIL
+    elif p.get("skipped"):
+        icon, icol = ft.Icons.REMOVE_CIRCLE_OUTLINE, MUTED
+    else:
+        icon, icol = ft.Icons.CHECK, OK
+    return ft.Row(
+        [
+            ft.Icon(icon, color=icol, size=16),
+            ft.Text(p["name"], color=FG, size=13, expand=True,
+                    no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS),
+            ft.Text(p["source"], color=MUTED, size=11),
+            ft.Container(
+                bgcolor=PANEL2, border_radius=6,
+                padding=ft.Padding(left=8, top=2, right=8, bottom=2),
+                content=ft.Text(p["tag"], color=ACCENT, size=11),
+            ),
+        ],
+        spacing=10,
+    )
 
-        g0 = tk.Frame(opt, bg=PANEL); g0.pack(fill="x", padx=14, pady=(12, 4))
-        tk.Label(g0, text="Host", bg=PANEL, fg=MUTED, font=FONT).pack(side="left")
-        tk.Entry(g0, textvariable=self.host, bg=ENTRY, fg=FG, insertbackground=FG, relief="flat",
-                 font=FONT, width=40, highlightthickness=1, highlightbackground=PANEL2,
-                 highlightcolor=ACCENT).pack(side="left", ipady=3, padx=6)
-        tk.Label(g0, text="Model", bg=PANEL, fg=MUTED, font=FONT).pack(side="left", padx=(10, 0))
-        self.model_om = tk.OptionMenu(g0, self.model, "auto")
-        self.model_om.configure(bg=PANEL2, fg=FG, activebackground=ACCENT, activeforeground="#fff",
-                                relief="flat", highlightthickness=0, font=FONT, width=22)
-        self.model_om["menu"].configure(bg=PANEL2, fg=FG, activebackground=ACCENT, activeforeground="#fff")
-        self.model_om.pack(side="left", padx=6)
-        self._btn(g0, "List models", self.refresh_models, accent=False).pack(side="left")
 
-        g1 = tk.Frame(opt, bg=PANEL); g1.pack(fill="x", padx=14, pady=4)
-        self._check(g1, "Create copy folder (originals untouched)", self.copy).pack(side="left", padx=(0, 18))
-        self._check(g1, "Move 99UNS -> misc subfolder", self.misc).pack(side="left", padx=(0, 18))
-        self._check(g1, "Skip unknown (don't touch 99UNS)", self.skipunknown).pack(side="left")
+def _pick_folder(page: "ft.Page", field: "ft.TextField") -> None:
+    """Open a native directory picker (async in Flet 0.85+) and write the path into *field*."""
+    async def _go() -> None:
+        fp = ft.FilePicker()
+        page.overlay.append(fp)
+        page.update()
+        path = await fp.get_directory_path()
+        if path:
+            field.value = path
+            page.update()
 
-        g2 = tk.Frame(opt, bg=PANEL); g2.pack(fill="x", padx=14, pady=4)
-        self._check(g2, "Vision model for no-text PDFs", self.vision).pack(side="left", padx=(0, 18))
-        self._check(g2, "Apply (rename for real)", self.apply).pack(side="left")
+    page.run_task(_go)
 
-        g3 = tk.Frame(opt, bg=PANEL); g3.pack(fill="x", padx=14, pady=(4, 12))
-        tk.Label(g3, text="Frontier on hard 99UNS", bg=PANEL, fg=MUTED, font=FONT).pack(side="left")
-        om = tk.OptionMenu(g3, self.frontier, "none", "claude")
-        om.configure(bg=PANEL2, fg=FG, activebackground=ACCENT, activeforeground="#fff",
-                     relief="flat", highlightthickness=0, font=FONT, width=8)
-        om["menu"].configure(bg=PANEL2, fg=FG, activebackground=ACCENT, activeforeground="#fff")
-        om.pack(side="left", padx=8)
-        tk.Label(g3, text="claude = haiku, uses your Claude subscription", bg=PANEL, fg=MUTED, font=FONT).pack(side="left")
 
-        # --- action buttons ---
-        bar = tk.Frame(root, bg=BG); bar.pack(fill="x", padx=18, pady=(10, 6))
-        self.run_btn = self._btn(bar, "Run", self.run, accent=True)
-        self.run_btn.pack(side="left")
-        self.stop_btn = self._btn(bar, "Stop", self.stop, accent=False)
-        self.stop_btn.configure(state="disabled"); self.stop_btn.pack(side="left", padx=8)
-        self._btn(bar, "Edit Tags", self.edit_tags, accent=False).pack(side="left", padx=8)
-        self._btn(bar, "Folders", self.folders, accent=False).pack(side="left")
-        self._btn(bar, "Report", self.show_report, accent=False).pack(side="left", padx=8)
-        self._btn(bar, "Clear log", lambda: self.log_box.delete("1.0", "end"), accent=False).pack(side="left")
-        self.status = tk.Label(bar, text="idle", bg=BG, fg=MUTED, font=FONT)
-        self.status.pack(side="right")
+def _metric(label: str, value_ctrl: "ft.Text") -> "ft.Container":
+    return ft.Container(
+        bgcolor=PANEL, border_radius=8, padding=10, expand=True,
+        content=ft.Column([ft.Text(label, size=11, color=MUTED), value_ctrl], spacing=2),
+    )
 
-        # --- progress + live stats strip ---
-        st = self._card(root)
-        self.pbar = tk.Canvas(st, height=16, bg=PANEL2, highlightthickness=0, bd=0)
-        self.pbar.pack(fill="x", padx=14, pady=(12, 4))
-        self.pbar_fill = self.pbar.create_rectangle(0, 0, 0, 16, fill=ACCENT, width=0)
-        self.var_prog = tk.StringVar(value="0 / 0  0%")
-        self.var_tps  = tk.StringVar(value="— tok/s")
-        self.var_toks = tk.StringVar(value="0 tok")
-        self.var_df   = tk.StringVar(value="done 0 / fail 0")
-        self.var_el   = tk.StringVar(value="0s")
-        self.var_eta  = tk.StringVar(value="~—")
-        srow = tk.Frame(st, bg=PANEL); srow.pack(fill="x", padx=14, pady=(0, 12))
-        for v, w in ((self.var_prog, 12), (self.var_tps, 12), (self.var_toks, 12),
-                     (self.var_df, 16), (self.var_el, 8), (self.var_eta, 8)):
-            tk.Label(srow, textvariable=v, bg=PANEL, fg=MUTED, font=FONT, width=w, anchor="w").pack(side="left")
-        self._run_t0 = 0.0
 
-        # --- log pane ---
-        logwrap = tk.Frame(root, bg=PANEL2, bd=0); logwrap.pack(fill="both", expand=True, padx=18, pady=(6, 16))
-        self.log_box = tk.Text(logwrap, wrap="none", bg=ENTRY, fg="#d6d6e0", insertbackground=FG,
-                               relief="flat", font=MONO, padx=10, pady=8, bd=0)
-        sb = tk.Scrollbar(logwrap, command=self.log_box.yview, bg=PANEL2, troughcolor=ENTRY, bd=0)
-        self.log_box.configure(yscrollcommand=sb.set)
-        sb.pack(side="right", fill="y"); self.log_box.pack(side="left", fill="both", expand=True)
+def _run_view(page: "ft.Page") -> "ft.Control":
+    """Build the Run view: controls, progress hero, counters, live feed."""
+    streams, subjects, _types = load_tags(config.tags_path())
+    cfg = config.load_config()
 
-        self.root.after(100, self.drain)
-        self.root.after(400, self.refresh_models)   # pre-fill the model list from the configured host
+    # ---- input controls ----
+    folder = ft.TextField(label="Folder", color=FG, expand=True,
+                          value=str(cfg.get("last_folder") or ""))
+    browse = ft.IconButton(ft.Icons.FOLDER_OPEN, tooltip="Browse",
+                           on_click=lambda _e: _pick_folder(page, folder))
+    host = ft.TextField(label="Host (name or URL, blank = default)", color=FG, width=320)
+    model = ft.Dropdown(label="Model", width=240, value="auto",
+                        options=[ft.dropdown.Option("auto")])
+    refresh = ft.IconButton(ft.Icons.REFRESH, tooltip="Refresh models")
+    frontier = ft.Dropdown(label="Frontier", width=160, value="none",
+                           options=[ft.dropdown.Option("none"), ft.dropdown.Option("claude")])
+    t_vision = ft.Switch(label="Vision", value=False)
+    t_apply = ft.Switch(label="Apply (rename)", value=False)
+    t_copy = ft.Switch(label="Work on a copy", value=False)
+    t_misc = ft.Switch(label="Move 99UNS → misc", value=True)
+    t_skip = ft.Switch(label="Skip unknown", value=False)
 
-    # ---- styled-widget helpers ----
-    def _card(self, parent):
-        c = tk.Frame(parent, bg=PANEL, highlightthickness=1, highlightbackground=PANEL2)
-        c.pack(fill="x", padx=18, pady=6)
-        return c
+    # ---- progress hero ----
+    pct = ft.Text("0%", size=42, weight=ft.FontWeight.W_500, color=FG)
+    of_n = ft.Text("file 0 / 0", size=13, color=MUTED)
+    elapsed = ft.Text("0:00", size=18, weight=ft.FontWeight.W_500, color=FG)
+    remaining = ft.Text("~—", size=18, weight=ft.FontWeight.W_500, color=ACCENT)
+    bar = ft.ProgressBar(value=0.0, bar_height=10, color=ACCENT, bgcolor=PANEL2)
+    c_done = ft.Text("0", size=20, color=OK, weight=ft.FontWeight.W_500)
+    c_skip = ft.Text("0", size=20, color=FG, weight=ft.FontWeight.W_500)
+    c_fail = ft.Text("0", size=20, color=FG, weight=ft.FontWeight.W_500)
+    c_tps = ft.Text("0", size=20, color=FG, weight=ft.FontWeight.W_500)
 
-    def _check(self, parent, text, var):
-        return tk.Checkbutton(parent, text=text, variable=var, bg=PANEL, fg=FG, font=FONT,
-                              selectcolor=ENTRY, activebackground=PANEL, activeforeground=FG,
-                              highlightthickness=0, anchor="w", takefocus=0)
+    feed = ft.ListView(expand=True, spacing=2, padding=4, auto_scroll=True)
+    status = ft.Text("idle", color=MUTED)
 
-    def _btn(self, parent, text, cmd, accent=False):
-        b = tk.Button(parent, text=text, command=cmd, font=FONT_B if accent else FONT,
-                      bg=ACCENT if accent else PANEL2, fg="#ffffff" if accent else FG,
-                      activebackground=ACCENT2 if accent else PANEL, activeforeground="#fff",
-                      relief="flat", bd=0, padx=18 if accent else 12, pady=6, cursor="hand2")
-        return b
+    # verbose live log (collapsed by default — full parity with the old GUI)
+    log = ft.ListView(expand=True, spacing=1, padding=6, auto_scroll=True)
 
-    # ---- actions ----
-    def browse(self):
-        d = filedialog.askdirectory(title="Select folder to tag")
-        if d: self.folder.set(d)
+    def log_line(text, color=MUTED):
+        log.controls.append(ft.Text(str(text).rstrip("\n"), color=color, size=11,
+                                    font_family="Consolas", selectable=True))
 
-    def refresh_models(self):
-        host = self.host.get().strip()
-        self.status.config(text="listing models...", fg=ACCENT2)
-        def work():
-            try: ms = available_models(host)
-            except Exception: ms = []
-            self.q.put(("__models__", ms))
-        threading.Thread(target=work, daemon=True).start()
+    state = {"t0": None, "skipped": 0, "active": False}
 
-    def _populate_models(self, ms):
-        opts = ["auto"] + list(ms or [])
-        menu = self.model_om["menu"]; menu.delete(0, "end")
-        for o in opts:
-            menu.add_command(label=o, command=tk._setit(self.model, o))
-        if self.model.get() not in opts: self.model.set("auto")
-        n = len(ms or [])
-        self.status.config(text=f"{n} model(s) loaded" if n else "no models / host down", fg=OK if n else MUTED)
-        self.log("[gui] models @ %s -> %s\n" % (self.host.get(), ", ".join(ms) if ms else "(none — is LM Studio up?)"))
+    def _tick_once():
+        if state["t0"]:
+            elapsed.value = _fmt_mmss(time.time() - state["t0"])
+            page.update()
 
-    def log(self, line):
-        self.log_box.insert("end", line); self.log_box.see("end")
+    def _ticker():
+        while state.get("active"):
+            page.run_thread(_tick_once)
+            time.sleep(1)
 
-    def run(self):
-        if self.proc: return
-        folder = self.folder.get().strip()
-        if not os.path.isdir(folder):
-            self.log("[gui] not a folder: %r\n" % folder); return
-        cmd = [sys.executable, "-m", "docsort.cli", folder]
-        host = self.host.get().strip()
-        if host:                          cmd += ["--host", host]
-        if self.model.get() != "auto":    cmd += ["--model", self.model.get(), "--vision-model", self.model.get()]
-        if self.vision.get():             cmd.append("--vision")
-        if self.apply.get():              cmd.append("--apply")
-        if self.copy.get():               cmd.append("--copy")
-        if not self.misc.get():           cmd.append("--no-misc")     # engine default is ON
-        if self.skipunknown.get():        cmd.append("--skip-unknown")
-        if self.frontier.get() != "none": cmd += ["--frontier", self.frontier.get()]
-        self.log("[gui] $ %s\n" % " ".join(cmd[2:]))
-        self._run_t0 = time.time()
-        self.var_prog.set("0 / 0  0%"); self.var_tps.set("— tok/s"); self.var_toks.set("0 tok")
-        self.var_df.set("done 0 / fail 0"); self.var_eta.set("~—")
-        self.pbar.coords(self.pbar_fill, 0, 0, 0, 16)
-        self.run_btn.config(state="disabled"); self.stop_btn.config(state="normal")
-        self.status.config(text="running...", fg=ACCENT2)
-        threading.Thread(target=self._worker, args=(cmd,), daemon=True).start()
-
-    def stop(self):
-        if self.proc:
-            try: self.proc.terminate()
-            except Exception: pass
-            self.status.config(text="stopping...", fg=MUTED)
-
-    def _set_progress(self, s):
+    # ---- model refresh ----
+    def do_refresh(_e=None) -> None:
+        api = config.resolve_api(cfg, host.value.strip() or None)
         try:
-            parts = s.split()
-            i, N = parts[1].split("/"); i, N = int(i), int(N)
-            kv = dict(p.split("=") for p in parts[2:] if "=" in p)
-            pct = int(100 * i / N) if N else 0
-            w = self.pbar.winfo_width() or 1
-            self.pbar.coords(self.pbar_fill, 0, 0, w * pct / 100, 16)
-            self.var_prog.set(f"{i} / {N}  {pct}%")
-            self.var_tps.set(f"{kv.get('tps','—')} tok/s")
-            self.var_toks.set(f"{kv.get('toks','0')} tok")
-            self.var_df.set(f"done {kv.get('done','0')} / fail {kv.get('failed','0')}")
-            self.var_eta.set("~" + kv.get("eta", "—"))
+            ms = available_models(api)
         except Exception:
-            pass
+            ms = []
+        model.options = [ft.dropdown.Option("auto")] + [ft.dropdown.Option(m) for m in ms]
+        if model.value not in {o.key for o in model.options}:
+            model.value = "auto"
+        page.update()
 
-    def _worker(self, cmd):
+    refresh.on_click = do_refresh
+    host.on_blur = do_refresh
+
+    # ---- event handling (RunController emits from a background thread) ----
+    def on_event(ev) -> None:
+        kind, payload = ev
+
+        def apply() -> None:
+            if kind == "progress":
+                bar.value = payload["pct"] / 100
+                pct.value = f"{payload['pct']}%"
+                of_n.value = f"file {payload['i']} / {payload['n']}"
+                c_done.value = str(payload["done"])
+                c_fail.value = str(payload["failed"])
+                c_tps.value = payload["tps"] or "0"
+                remaining.value = "~" + (_fmt_mmss(int(payload["eta"])) if payload["eta"].isdigit() else "—")
+                if state["t0"]:
+                    elapsed.value = _fmt_mmss(time.time() - state["t0"])
+                log_line(f"[progress] {payload['i']}/{payload['n']} done={payload['done']} "
+                         f"failed={payload['failed']} tps={payload['tps']} eta={payload['eta']}s")
+            elif kind == "file":
+                if payload.get("skipped"):
+                    state["skipped"] += 1
+                    c_skip.value = str(state["skipped"])
+                feed.controls.append(_feed_row(payload))
+                log_line(f"{payload['tag']} {payload['source']:14} {payload['name']}", color=FG)
+            elif kind == "log":
+                log_line(payload)
+            elif kind == "done":
+                status.value = "done"
+                status.color = OK
+                run_btn.disabled = False
+                stop_btn.disabled = True
+                state["active"] = False
+                if state["t0"]:
+                    elapsed.value = _fmt_mmss(time.time() - state["t0"])
+                log_line("[done]", color=OK)
+            page.update()
+
+        page.run_thread(apply)
+
+    ctrl = RunController(streams, subjects, on_event=on_event)
+
+    # ---- run / stop ----
+    def start_run(_e) -> None:
+        f = folder.value.strip()
+        if not os.path.isdir(f):
+            status.value = f"not a folder: {f}"
+            status.color = FAIL
+            page.update()
+            return
+        opts = {"host": host.value.strip(), "model": model.value, "vision": t_vision.value,
+                "apply": t_apply.value, "copy": t_copy.value, "misc": t_misc.value,
+                "skip_unknown": t_skip.value, "frontier": frontier.value}
+        cmd = build_run_cmd(opts, python=sys.executable, folder=f)
+        feed.controls.clear()
+        log.controls.clear()
+        state["t0"] = time.time()
+        state["skipped"] = 0
+        state["active"] = True
+        pct.value = "0%"
+        of_n.value = "file 0 / 0"
+        bar.value = 0.0
+        c_done.value = c_fail.value = c_skip.value = "0"
+        c_tps.value = "0"
+        elapsed.value = "0:00"
+        remaining.value = "~—"
+        status.value = "running…"
+        status.color = ACCENT
+        run_btn.disabled = True
+        stop_btn.disabled = False
+        page.update()
+        ctrl.start(cmd, cwd=PKG_PARENT)
+        threading.Thread(target=_ticker, daemon=True).start()
+
+    run_btn = ft.FilledButton("Run", icon=ft.Icons.PLAY_ARROW, on_click=start_run,
+                              style=ft.ButtonStyle(bgcolor=ACCENT))
+    stop_btn = ft.OutlinedButton("Stop", icon=ft.Icons.STOP, disabled=True,
+                                 on_click=lambda _e: ctrl.stop())
+
+    # ---- layout ----
+    hero = ft.Container(
+        bgcolor=PANEL, border_radius=12, padding=18,
+        content=ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Row([pct, of_n], spacing=10,
+                               vertical_alignment=ft.CrossAxisAlignment.END),
+                        ft.Row(
+                            [
+                                ft.Column([ft.Text("elapsed", size=11, color=MUTED), elapsed], spacing=2),
+                                ft.Column([ft.Text("remaining", size=11, color=MUTED), remaining], spacing=2),
+                            ],
+                            spacing=22,
+                        ),
+                    ],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                ),
+                bar,
+                ft.Row(
+                    [_metric("done", c_done), _metric("skipped", c_skip),
+                     _metric("failed", c_fail), _metric("tok/s", c_tps)],
+                    spacing=10,
+                ),
+            ],
+            spacing=14,
+        ),
+    )
+
+    controls = ft.Column(
+        [
+            ft.Row([folder, browse]),
+            ft.Row([host, model, refresh, frontier], wrap=True, vertical_alignment=ft.CrossAxisAlignment.END),
+            ft.Row([t_vision, t_apply, t_copy, t_misc, t_skip], wrap=True),
+            ft.Row([run_btn, stop_btn, status]),
+        ],
+        spacing=10,
+    )
+
+    log_panel = ft.ExpansionTile(
+        title=ft.Text("Log (verbose)", color=MUTED, size=12),
+        expanded=False,
+        controls=[ft.Container(bgcolor=ENTRY, border_radius=8, padding=4,
+                               height=180, content=log)],
+    )
+
+    view = ft.Column(
+        [
+            controls,
+            hero,
+            ft.Container(bgcolor=PANEL, border_radius=12, padding=6, expand=True, content=feed),
+            log_panel,
+        ],
+        spacing=14,
+        expand=True,
+    )
+    view.data = folder           # expose the folder field to the Reports view
+    return view
+
+
+# ---------------------------------------------------------------------------
+# Tags view (structured editor over tagsio)
+# ---------------------------------------------------------------------------
+
+def _tags_view(page: "ft.Page") -> "ft.Control":
+    path = config.tags_path()
+    text = open(path, encoding="utf-8").read()
+    palette = {"STREAMS": ACCENT, "SUBJECTS": "#5b8cff", "TYPES": OK}
+    cols: dict = {}
+
+    def make_col(name: str) -> "ft.Container":
+        lv = ft.ListView(expand=True, spacing=4)
+        fields: list = []
+        holder: dict = {}
+
+        def mk_row(value: str) -> "ft.Row":
+            tf = ft.TextField(value=value, color=FG, text_size=13, expand=True)
+            row = ft.Row(
+                [tf, ft.IconButton(ft.Icons.DELETE, icon_color=FAIL,
+                                   on_click=lambda e: (lv.controls.remove(holder[tf]),
+                                                       fields.remove(tf), page.update()))],
+                spacing=4,
+            )
+            holder[tf] = row
+            fields.append(tf)
+            return row
+
+        for it in tagsio.tag_block(text, name):
+            lv.controls.append(mk_row(it))
+
+        def add(_e):
+            lv.controls.append(mk_row(""))
+            page.update()
+
+        cols[name] = fields
+        return ft.Container(
+            bgcolor=PANEL, border_radius=12, padding=10, expand=True,
+            content=ft.Column(
+                [ft.Text(name, color=palette[name], weight=ft.FontWeight.W_500),
+                 lv, ft.TextButton("+ add", on_click=add)],
+                spacing=8, expand=True),
+        )
+
+    col_row = ft.Row([make_col("STREAMS"), make_col("SUBJECTS"), make_col("TYPES")],
+                     expand=True, spacing=10)
+    status = ft.Text("", color=OK)
+
+    def save(_e):
+        new = text
+        for n in ("STREAMS", "SUBJECTS", "TYPES"):
+            lines = [tf.value.rstrip() for tf in cols[n] if tf.value.strip()]
+            new = tagsio.replace_block(new, n, lines)
         try:
-            self.proc = subprocess.Popen(cmd, cwd=PKG_PARENT, stdout=subprocess.PIPE,
-                                         stderr=subprocess.STDOUT, text=True, bufsize=1)
-            for line in self.proc.stdout:
-                if "MuPDF error" in line:    # benign render warnings -> drop
-                    continue
-                if line.startswith("PROGRESS "):
-                    self.q.put(("__progress__", line.strip()))
-                else:
-                    self.q.put(line)
-            self.proc.wait()
+            open(path, "w", encoding="utf-8").write(new)
+            status.value, status.color = "tags saved", OK
         except Exception as e:
-            self.q.put("[gui] error: %s\n" % e)
-        finally:
-            self.q.put(None)
+            status.value, status.color = f"save failed: {e}", FAIL
+        page.update()
 
-    def drain(self):
+    return ft.Column(
+        [ft.Text("First token on each line = the code.", color=MUTED, size=12),
+         col_row,
+         ft.Row([ft.FilledButton("Save", on_click=save, style=ft.ButtonStyle(bgcolor=ACCENT)), status])],
+        spacing=12, expand=True)
+
+
+# ---------------------------------------------------------------------------
+# Folders view (exclude / include → config.json)
+# ---------------------------------------------------------------------------
+
+def _folders_view(page: "ft.Page") -> "ft.Control":
+    import json
+    cfgp = config.config_path()
+    try:
+        data = json.load(open(cfgp, encoding="utf-8"))
+    except Exception:
+        data = {}
+
+    def make_list(key: str, label: str, colour: str):
+        items = list(data.get(key) or [])
+        lv = ft.ListView(expand=True, spacing=2)
+
+        def render():
+            lv.controls.clear()
+            for it in list(items):
+                lv.controls.append(ft.Row(
+                    [ft.Text(it, color=FG, size=12, expand=True, no_wrap=True,
+                             overflow=ft.TextOverflow.ELLIPSIS),
+                     ft.IconButton(ft.Icons.DELETE, icon_color=FAIL,
+                                   on_click=lambda e, v=it: (items.remove(v), render(), page.update()))],
+                    spacing=4))
+
+        def add(_e):
+            async def _go():
+                fp = ft.FilePicker()
+                page.overlay.append(fp)
+                page.update()
+                path = await fp.get_directory_path()
+                if path:
+                    items.append(path)
+                    render()
+                    page.update()
+            page.run_task(_go)
+
+        render()
+        box = ft.Container(
+            bgcolor=PANEL, border_radius=12, padding=10, expand=True,
+            content=ft.Column(
+                [ft.Text(label, color=colour, weight=ft.FontWeight.W_500), lv,
+                 ft.TextButton("+ add folder", on_click=add)],
+                spacing=8, expand=True))
+        return box, items
+
+    ex_box, ex_items = make_list("exclude", "Exclude", FAIL)
+    in_box, in_items = make_list("include", "Include", OK)
+    status = ft.Text("", color=OK)
+
+    def save(_e):
+        data["exclude"], data["include"] = list(ex_items), list(in_items)
         try:
-            while True:
-                item = self.q.get_nowait()
-                if item is None:
-                    self.proc = None
-                    self.run_btn.config(state="normal"); self.stop_btn.config(state="disabled")
-                    self.status.config(text="done", fg=OK)
-                elif isinstance(item, tuple) and item[0] == "__models__":
-                    self._populate_models(item[1])
-                elif isinstance(item, tuple) and item[0] == "__progress__":
-                    self._set_progress(item[1])
-                else:
-                    self.log(item)
-        except queue.Empty:
-            pass
-        if self.proc and self._run_t0:                  # live elapsed clock while running
-            self.var_el.set(f"{int(time.time() - self._run_t0)}s")
-        self.root.after(100, self.drain)
+            json.dump(data, open(cfgp, "w", encoding="utf-8"), indent=2)
+            status.value, status.color = "folders saved", OK
+        except Exception as e:
+            status.value, status.color = f"save failed: {e}", FAIL
+        page.update()
 
-    # ---- in-app tag editor (structured: add/delete + colour coding) ----
-    FOUND = {"00MM", "90HUM", "91PHY", "92CHEM"}      # foundation (non-core-EE) subjects
-    SPECIAL = {"NA", "99UNS"}                          # not real topics
+    return ft.Column(
+        [ft.Text("Exclude = skip these. Include = if non-empty, ONLY these.", color=MUTED, size=12),
+         ft.Row([ex_box, in_box], expand=True, spacing=10),
+         ft.Row([ft.FilledButton("Save", on_click=save, style=ft.ButtonStyle(bgcolor=ACCENT)), status])],
+        spacing=12, expand=True)
 
-    @staticmethod
-    def _tag_block(text, header):
-        m = re.search(r"##\s*" + header + r".*?```tags\n(.*?)```", text, re.S | re.I)
-        return [l.rstrip() for l in (m.group(1).splitlines() if m else []) if l.strip()]
 
-    @staticmethod
-    def _replace_block(text, header, lines):
-        pat = re.compile(r"(##\s*" + header + r".*?```tags\n)(.*?)(```)", re.S | re.I)
-        body = "\n".join(x.rstrip() for x in lines if x.strip()) + "\n"
-        return pat.sub(lambda m: m.group(1) + body + m.group(3), text, count=1)
+# ---------------------------------------------------------------------------
+# Reports + Stats views
+# ---------------------------------------------------------------------------
 
-    def _colour_list(self, lb, base, name):
-        for i in range(lb.size()):
-            toks = lb.get(i).split()
-            code = toks[0] if toks else ""
-            c = base
-            if name == "SUBJECTS" and code in self.FOUND: c = "#e0a45e"   # foundation amber
-            if code in self.SPECIAL: c = MUTED
-            lb.itemconfig(i, fg=c)
+def _reports_view(page: "ft.Page", folder_getter) -> "ft.Control":
+    body = ft.Text("", selectable=True, color=FG, font_family="Consolas", size=12)
+    info = ft.Text("", color=MUTED, size=12)
 
-    def _tag_column(self, parent, name, items, colour):
-        fr = tk.Frame(parent, bg=PANEL, highlightthickness=1, highlightbackground=PANEL2)
-        fr.pack(side="left", fill="both", expand=True, padx=6)
-        tk.Label(fr, text=name, bg=PANEL, fg=colour, font=FONT_B).pack(anchor="w", padx=10, pady=(8, 4))
-        lb = tk.Listbox(fr, bg=ENTRY, fg=FG, font=MONO, selectbackground=ACCENT, selectforeground="#fff",
-                        relief="flat", highlightthickness=0, activestyle="none")
-        lb.pack(fill="both", expand=True, padx=10)
-        for it in items: lb.insert("end", it)
-        self._colour_list(lb, colour, name)
-        row = tk.Frame(fr, bg=PANEL); row.pack(fill="x", padx=10, pady=8)
-        ent = tk.Entry(row, bg=ENTRY, fg=FG, insertbackground=FG, relief="flat", font=FONT,
-                       highlightthickness=1, highlightbackground=PANEL2, highlightcolor=colour)
-        ent.pack(side="left", fill="x", expand=True, ipady=3)
-        def add():
-            v = ent.get().strip()
-            if v: lb.insert("end", v); self._colour_list(lb, colour, name); ent.delete(0, "end")
-        def dele():
-            for i in reversed(lb.curselection()): lb.delete(i)
-        def edit(_e):                                  # double-click: pull into entry to re-add
-            sel = lb.curselection()
-            if sel: ent.delete(0, "end"); ent.insert(0, lb.get(sel[0])); lb.delete(sel[0])
-        ent.bind("<Return>", lambda e: add()); lb.bind("<Double-Button-1>", edit)
-        self._btn(row, "+ Add", add).pack(side="left", padx=(6, 2))
-        self._btn(row, "Del", dele).pack(side="left")
-        return lb
-
-    # ---- report viewer (DOCSORT-REPORT.md from the selected folder, or its COPY) ----
-    def show_report(self):
-        folder = self.folder.get().strip()
+    def load(_e=None):
+        folder = (folder_getter() or "").strip()
         cands = [os.path.join(folder, "DOCSORT-REPORT.md"),
                  os.path.join(folder + "COPY", "DOCSORT-REPORT.md")]
-        path = next((p for p in cands if os.path.isfile(p)), None)
+        path = next((p for p in cands if folder and os.path.isfile(p)), None)
         if not path:
-            messagebox.showinfo("Report", "No DOCSORT-REPORT.md yet — run a tagging pass first."); return
-        try: text = open(path, encoding="utf-8").read()
-        except Exception as e: messagebox.showerror("Report", str(e)); return
-        win = tk.Toplevel(self.root); win.title("Report  -  " + os.path.basename(os.path.dirname(path)))
-        win.configure(bg=BG); win.geometry("680x600")
-        tk.Label(win, text=path, bg=BG, fg=MUTED, font=FONT).pack(fill="x", padx=14, pady=(12, 4), anchor="w")
-        wrap = tk.Frame(win, bg=PANEL2); wrap.pack(fill="both", expand=True, padx=14, pady=(0, 12))
-        t = tk.Text(wrap, wrap="word", bg=ENTRY, fg=FG, relief="flat", font=MONO, padx=10, pady=8, bd=0)
-        sb = tk.Scrollbar(wrap, command=t.yview, bg=PANEL2, troughcolor=ENTRY, bd=0)
-        t.configure(yscrollcommand=sb.set); sb.pack(side="right", fill="y"); t.pack(side="left", fill="both", expand=True)
-        t.insert("1.0", text); t.configure(state="disabled")
+            info.value = "No DOCSORT-REPORT.md yet — run a tagging pass first."
+            body.value = ""
+        else:
+            info.value = path
+            body.value = open(path, encoding="utf-8").read()
+        page.update()
 
-    # ---- exclude / include folder lists (saved to config.json) ----
-    def folders(self):
-        import json
-        cfgp = config.config_path()
-        try: data = json.load(open(cfgp, encoding="utf-8"))
-        except Exception: data = {}
-        win = tk.Toplevel(self.root); win.title("Folders  -  exclude / include"); win.configure(bg=BG)
-        win.geometry("760x440")
-        tk.Label(win, text="Exclude = skip these folders.   Include = if non-empty, ONLY these.   (paths or folder names)",
-                 bg=BG, fg=MUTED, font=FONT).pack(fill="x", padx=14, pady=(12, 2), anchor="w")
-        cols = tk.Frame(win, bg=BG); cols.pack(fill="both", expand=True, padx=8, pady=6)
-        boxes = {}
-        for key, label, colour in (("exclude", "Exclude", "#e0715e"), ("include", "Include", OK)):
-            fr = tk.Frame(cols, bg=PANEL, highlightthickness=1, highlightbackground=PANEL2)
-            fr.pack(side="left", fill="both", expand=True, padx=6)
-            tk.Label(fr, text=label, bg=PANEL, fg=colour, font=FONT_B).pack(anchor="w", padx=10, pady=(8, 4))
-            lb = tk.Listbox(fr, bg=ENTRY, fg=FG, font=MONO, selectbackground=ACCENT, selectforeground="#fff",
-                            relief="flat", highlightthickness=0, activestyle="none")
-            lb.pack(fill="both", expand=True, padx=10)
-            for it in (data.get(key) or []): lb.insert("end", it)
-            row = tk.Frame(fr, bg=PANEL); row.pack(fill="x", padx=10, pady=8)
-            def mk_add(lb=lb):
-                d = filedialog.askdirectory(title="Add folder")
-                if d: lb.insert("end", d)
-            def mk_del(lb=lb):
-                for i in reversed(lb.curselection()): lb.delete(i)
-            self._btn(row, "+ Add folder", mk_add).pack(side="left")
-            self._btn(row, "Del", mk_del).pack(side="left", padx=6)
-            boxes[key] = lb
-        bar = tk.Frame(win, bg=BG); bar.pack(fill="x", padx=14, pady=10)
-        def save():
-            data["exclude"] = list(boxes["exclude"].get(0, "end"))
-            data["include"] = list(boxes["include"].get(0, "end"))
-            try:
-                json.dump(data, open(cfgp, "w", encoding="utf-8"), indent=2)
-                self.status.config(text="folders saved", fg=OK); win.destroy()
-            except Exception as e:
-                messagebox.showerror("Folders", f"Save failed\n{e}")
-        self._btn(bar, "Save", save, accent=True).pack(side="left")
-        self._btn(bar, "Cancel", win.destroy).pack(side="left", padx=8)
-
-    def edit_tags(self):
-        path = config.tags_path()
-        try:
-            text = open(path, encoding="utf-8").read()
-        except Exception as e:
-            messagebox.showerror("Edit Tags", f"Could not read {path}\n{e}"); return
-        win = tk.Toplevel(self.root); win.title("Edit Tags  -  TAGS.md"); win.configure(bg=BG)
-        win.geometry("940x560")
-        tk.Label(win, text="first token on each line = the code · double-click to edit · colour: stream / subject / type / foundation",
-                 bg=BG, fg=MUTED, font=FONT).pack(fill="x", padx=14, pady=(12, 2), anchor="w")
-        cols = tk.Frame(win, bg=BG); cols.pack(fill="both", expand=True, padx=8, pady=6)
-        lists = {}
-        for name, colour in (("STREAMS", ACCENT), ("SUBJECTS", ACCENT2), ("TYPES", OK)):
-            lists[name] = self._tag_column(cols, name, self._tag_block(text, name), colour)
-        bar = tk.Frame(win, bg=BG); bar.pack(fill="x", padx=14, pady=10)
-
-        def save():
-            new = text
-            for name in ("STREAMS", "SUBJECTS", "TYPES"):
-                new = self._replace_block(new, name, list(lists[name].get(0, "end")))
-            try:
-                open(path, "w", encoding="utf-8").write(new)
-                self.status.config(text="tags saved", fg=OK); win.destroy()
-            except Exception as e:
-                messagebox.showerror("Edit Tags", f"Save failed\n{e}")
-
-        self._btn(bar, "Save", save, accent=True).pack(side="left")
-        self._btn(bar, "Cancel", win.destroy, accent=False).pack(side="left", padx=8)
+    return ft.Column(
+        [ft.Row([ft.FilledButton("Load report", on_click=load), info]),
+         ft.Container(bgcolor=PANEL, border_radius=12, padding=12, expand=True,
+                      content=ft.Column([body], scroll=ft.ScrollMode.AUTO, expand=True))],
+        spacing=12, expand=True)
 
 
-def main():
-    root = tk.Tk()
-    App(root)
-    root.mainloop()
+def _stats_view(page: "ft.Page") -> "ft.Control":
+    import json
+    import collections
+    idx = os.path.join(config.user_dir(), "index.jsonl")
+    lines = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO, expand=True)
+    if not os.path.isfile(idx):
+        lines.controls.append(ft.Text("No runs yet — run a tagging pass first.", color=MUTED))
+    else:
+        runs = [json.loads(l) for l in open(idx, encoding="utf-8") if l.strip()]
+        files = sum(int(r.get("n", 0) or 0) for r in runs)
+        agg: "collections.Counter" = collections.Counter()
+        for r in runs:
+            agg.update(r.get("by") or {})
+        lines.controls.append(ft.Text(f"{len(runs)} runs · {files} files tagged",
+                                      color=FG, size=16, weight=ft.FontWeight.W_500))
+        for k, c in agg.most_common(20):
+            lines.controls.append(ft.Text(f"{k}  ×{c}", color=MUTED, size=13, font_family="Consolas"))
+
+    return ft.Column([ft.Text("Lifetime stats", color=MUTED, size=12), lines],
+                     spacing=12, expand=True)
+
+
+# ---------------------------------------------------------------------------
+# Flet page builder
+# ---------------------------------------------------------------------------
+
+def _build(page: "ft.Page") -> None:
+    """Build the Flet UI tree and attach it to *page*."""
+    page.title = "docsort"
+    page.bgcolor = BG
+    page.padding = 0
+    page.theme_mode = ft.ThemeMode.DARK
+    page.theme = ft.Theme(color_scheme_seed=ACCENT)
+    page.dark_theme = ft.Theme(color_scheme_seed=ACCENT)
+
+    # Window minimum size (Page.window is a Window sub-object in Flet 0.85+)
+    page.window.min_width = 720
+    page.window.min_height = 560
+
+    # Build the Run view once; other views are built lazily on first visit.
+    run_view = _run_view(page)
+    content = ft.Container(expand=True, padding=18, content=run_view)
+    cache: dict = {0: run_view}
+
+    def _folder_value() -> str:
+        fld = getattr(run_view, "data", None)
+        return fld.value if fld is not None else ""
+
+    def _make_view(idx: int) -> "ft.Control":
+        if idx == 1:
+            return _tags_view(page)
+        if idx == 2:
+            return _folders_view(page)
+        if idx == 3:
+            return _reports_view(page, _folder_value)
+        if idx == 4:
+            return _stats_view(page)
+        return run_view
+
+    def _on_nav_change(e: "ft.ControlEvent") -> None:
+        idx: int = e.control.selected_index
+        if idx not in cache:
+            cache[idx] = _make_view(idx)
+        content.content = cache[idx]
+        page.update()
+
+    rail = ft.NavigationRail(
+        selected_index=0,
+        bgcolor=PANEL,
+        indicator_color=ACCENT,
+        min_width=84,
+        group_alignment=-0.9,
+        destinations=[
+            ft.NavigationRailDestination(icon=ft.Icons.PLAY_ARROW, label="Run"),
+            ft.NavigationRailDestination(icon=ft.Icons.LABEL, label="Tags"),
+            ft.NavigationRailDestination(icon=ft.Icons.FOLDER_OPEN, label="Folders"),
+            ft.NavigationRailDestination(icon=ft.Icons.DESCRIPTION, label="Reports"),
+            ft.NavigationRailDestination(icon=ft.Icons.BAR_CHART, label="Stats"),
+        ],
+        on_change=_on_nav_change,
+    )
+
+    page.add(
+        ft.Row([rail, ft.VerticalDivider(width=1, color=PANEL2), content],
+               expand=True, spacing=0)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    """Launch the docsort GUI.  Called by the ``docsort-gui`` console script."""
+    if ft is None:
+        sys.stderr.write(
+            "docsort-gui needs the GUI extra.  Install it with:\n"
+            '    pip install "docsort[gui]"\n'
+        )
+        sys.exit(1)
+
+    # ft.app() is deprecated since Flet 0.80 — use ft.run()
+    ft.run(_build)
 
 
 if __name__ == "__main__":

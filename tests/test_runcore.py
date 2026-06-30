@@ -1,0 +1,115 @@
+import sys as _sys, time as _time
+
+from docsort import runcore
+
+
+def test_parse_progress_basic():
+    d = runcore.parse_progress("PROGRESS 34/50 done=33 failed=1 tps=41 toks=1234 eta=26s")
+    assert d == {"i": 34, "n": 50, "pct": 68, "done": 33, "failed": 1,
+                 "tps": "41", "toks": "1234", "eta": "26"}
+
+
+def test_parse_progress_zero_total():
+    d = runcore.parse_progress("PROGRESS 0/0 done=0 failed=0 tps=0 toks=0 eta=0s")
+    assert d["pct"] == 0 and d["n"] == 0
+
+
+def test_parse_progress_rejects_other_lines():
+    assert runcore.parse_progress("[model] 'x' not loaded -> 'y'") is None
+    assert runcore.parse_progress("CW 08DIG notes high text a.pdf") is None
+
+
+STREAMS = {"CW", "GATE", "PROJ", "RES", "REC", "REF"}
+SUBJECTS = {"08DIG", "10CTRL", "99UNS", "NA"}
+
+
+def test_parse_result_row_basic():
+    line = "CW   08DIG  notes     high text          control_bode_notes.pdf"
+    r = runcore.parse_result_row(line, STREAMS, SUBJECTS)
+    assert r["stream"] == "CW" and r["subject"] == "08DIG"
+    assert r["type"] == "notes" and r["conf"] == "high" and r["source"] == "text"
+    assert r["name"] == "control_bode_notes.pdf"
+    assert r["tag"] == "[CW-08DIG]" and r["skipped"] is False
+    assert r["failed"] is False
+
+
+def test_parse_result_row_multiword_filename():
+    line = "CW 08DIG notes high text my long filename.pdf"
+    r = runcore.parse_result_row(line, STREAMS, SUBJECTS)
+    assert r["name"] == "my long filename.pdf"
+
+
+def test_parse_result_row_strips_markers():
+    line = "GATE 99UNS  pyq       high text          gate_2024_ec_paper.pdf  ->skip"
+    r = runcore.parse_result_row(line, STREAMS, SUBJECTS)
+    assert r["name"] == "gate_2024_ec_paper.pdf" and r["skipped"] is True
+
+
+def test_parse_result_row_failed_flag():
+    line = "CW 99UNS misc low error broken.pdf  FAIL"
+    r = runcore.parse_result_row(line, STREAMS, SUBJECTS)
+    assert r["failed"] is True and r["name"] == "broken.pdf"
+
+
+def test_parse_result_row_rejects_non_rows():
+    assert runcore.parse_result_row("PROGRESS 1/2 done=1 failed=0", STREAMS, SUBJECTS) is None
+    assert runcore.parse_result_row("[model] note", STREAMS, SUBJECTS) is None
+    assert runcore.parse_result_row("ZZ 08DIG notes high text x.pdf", STREAMS, SUBJECTS) is None
+
+
+def test_build_run_cmd_defaults():
+    cmd = runcore.build_run_cmd({}, python="PY", folder="F")
+    assert cmd == ["PY", "-m", "docsort.cli", "F"]
+
+
+def test_build_run_cmd_all_toggles():
+    opts = {"host": "HOME", "model": "qwen", "vision": True, "apply": True,
+            "copy": True, "misc": False, "skip_unknown": True, "frontier": "claude"}
+    cmd = runcore.build_run_cmd(opts, python="PY", folder="F")
+    assert cmd == ["PY", "-m", "docsort.cli", "F",
+                   "--host", "HOME", "--model", "qwen", "--vision-model", "qwen",
+                   "--vision", "--apply", "--copy", "--no-misc",
+                   "--skip-unknown", "--frontier", "claude"]
+
+
+def test_build_run_cmd_model_auto_and_misc_default():
+    cmd = runcore.build_run_cmd({"model": "auto", "misc": True}, python="PY", folder="F")
+    assert "--model" not in cmd and "--no-misc" not in cmd
+
+
+def test_run_controller_emits_events():
+    emitter = ("import sys;"
+               "print('starting');"
+               "print('PROGRESS 1/2 done=1 failed=0 tps=10 toks=5 eta=3s');"
+               "print('CW 08DIG notes high text a.pdf');"
+               "print('MuPDF error: ignore me');"
+               "sys.stdout.flush()")
+    cmd = [_sys.executable, "-c", emitter]
+    events = []
+    streams = {"CW"}; subjects = {"08DIG"}
+    ctrl = runcore.RunController(streams, subjects, on_event=events.append)
+    ctrl.start(cmd, cwd=".")
+    for _ in range(100):                 # wait up to ~5s for the 'done' event
+        if any(e[0] == "done" for e in events):
+            break
+        _time.sleep(0.05)
+    kinds = [e[0] for e in events]
+    assert "progress" in kinds and "file" in kinds and "done" in kinds
+    prog = next(e[1] for e in events if e[0] == "progress")
+    assert prog["i"] == 1 and prog["n"] == 2
+    fil = next(e[1] for e in events if e[0] == "file")
+    assert fil["name"] == "a.pdf"
+    assert not any("MuPDF error" in (e[1] if isinstance(e[1], str) else "") for e in events)
+
+
+def test_run_controller_running_flag_and_stop():
+    cmd = [_sys.executable, "-c", "import time; time.sleep(0.3); print('done')"]
+    ctrl = runcore.RunController({"CW"}, {"08DIG"}, on_event=lambda e: None)
+    assert ctrl.running is False
+    ctrl.start(cmd, cwd=".")
+    ctrl.stop()
+    for _ in range(100):
+        if not ctrl.running:
+            break
+        _time.sleep(0.05)
+    assert ctrl.running is False
