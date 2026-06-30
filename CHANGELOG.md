@@ -2,6 +2,23 @@
 
 All notable changes. Newest on top.
 
+## [0.11.0] — 2026-06-30
+### Changed
+- **GUI rebuilt on Flet** (Python) — modern Discord-like dark UI with a left nav rail
+  (Run / Tags / Folders / Reports / Stats), and a Run view that foregrounds progress %,
+  elapsed + ETA, throughput, done/skipped/failed counters, a live per-file feed (each file's
+  tier + `[STREAM-SUBJECT]` tag), and a verbose collapsible live-log pane. Replaces the
+  Tkinter front end. **No engine or behaviour change** — the UI still drives the existing
+  `docsort` CLI as a subprocess. Built against Flet 0.85.
+- GUI is now an optional extra: `pip install "docsort[gui]"` (the `flet` dependency). CLI-only
+  installs stay dependency-light; `docsort-gui` prints an install hint if flet is missing.
+### Added
+- `docsort/runcore.py` — UI-agnostic run core (PROGRESS/result-row parsing, command builder,
+  threaded `RunController` emitting typed events); fully unit-tested.
+- `docsort/tagsio.py` — TAGS.md block read/rewrite, decoupled from any UI.
+### Build
+- Release workflow builds the GUI exe with `flet pack` (CLI exe still via PyInstaller).
+
 ## [0.10.2] — 2026-06-29
 ### Docs (no code changes)
 - **Design notes added** under `docs/design/`: `council.md` (the LLM Council — a *separate* project
