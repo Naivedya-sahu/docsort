@@ -40,3 +40,6 @@ desktop.ini
 *.spec
 dist_test/
 build_test/
+
+# flet pack generated icon
+generated-*.ico
