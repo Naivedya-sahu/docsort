@@ -1,7 +1,11 @@
 """UI-agnostic run core for docsort: parse the engine's stdout contract,
 build the CLI command, and drive the run as a subprocess. No UI imports."""
 from __future__ import annotations
-import sys, subprocess, threading
+import os, sys, subprocess, threading
+
+# On Windows, a windowed (no-console) app spawning a child process pops a console
+# window unless this flag is set. No-op on other platforms.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 
 
 def parse_progress(line):
@@ -44,10 +48,22 @@ def parse_result_row(line, streams, subjects):
             "failed": failed}
 
 
+def cli_prefix(python=None):
+    """Argv prefix that invokes the docsort CLI engine.
+
+    From source: ``python -m docsort.cli``. When frozen (the packaged GUI exe),
+    ``sys.executable`` is the GUI exe itself and ``-m`` is ignored, so we re-invoke
+    the same exe with a ``--run-cli`` sentinel that run_gui.py routes to cli.main."""
+    exe = python or sys.executable
+    if getattr(sys, "frozen", False):
+        return [exe, "--run-cli"]
+    return [exe, "-m", "docsort.cli"]
+
+
 def build_run_cmd(opts, python=None, folder=None):
-    """Build the `python -m docsort.cli <folder> ...` command from UI options.
-    Mirrors the existing gui.run() flag mapping exactly. `misc` defaults ON."""
-    cmd = [python or sys.executable, "-m", "docsort.cli", folder]
+    """Build the docsort CLI command from UI options. Mirrors gui.run()'s flag
+    mapping exactly. `misc` defaults ON."""
+    cmd = cli_prefix(python) + [folder]
     if opts.get("host"):
         cmd += ["--host", opts["host"]]
     model = opts.get("model", "auto")
@@ -91,7 +107,7 @@ class RunController:
         try:
             self.proc = subprocess.Popen(
                 cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1)
+                text=True, bufsize=1, creationflags=_NO_WINDOW)
             for line in self.proc.stdout:
                 if "MuPDF error" in line:
                     continue

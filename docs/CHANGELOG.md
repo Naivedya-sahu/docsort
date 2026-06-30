@@ -2,6 +2,18 @@
 
 All notable changes. Newest on top.
 
+## [0.12.1] — 2026-06-30
+### Fixed
+- **No background console window.** The pip `docsort-gui` entry is now a `gui-scripts`
+  (windowed) launcher instead of a `console_scripts` one, and the classifier subprocess is spawned with
+  `CREATE_NO_WINDOW` on Windows — no terminal flashes when the GUI runs.
+- **Run / Apply audited now work in the packaged exe.** When frozen, `sys.executable` is the GUI exe
+  (not a Python interpreter), so `-m docsort.cli` was silently ignored and the subprocess re-launched the
+  GUI instead of classifying. The GUI now re-invokes the exe with a `--run-cli` sentinel (routed in
+  `run_gui.py`) so the bundled engine runs inside the same exe. New `runcore.cli_prefix()` picks the right
+  invocation for source vs. frozen.
+- Custom app icon wired into the GUI + CLI exe builds (`flet pack -i` / `pyinstaller --icon`).
+
 ## [0.12.0] — 2026-06-30
 ### Added
 - **`--apply-journal` (fast apply)** — replay a prior dry-run's audited decisions from

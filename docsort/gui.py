@@ -22,7 +22,7 @@ except ImportError:          # CLI-only install — no flet wheel
 
 from . import config, tagsio
 from .cli import available_models, load_tags
-from .runcore import RunController, build_run_cmd
+from .runcore import RunController, build_run_cmd, cli_prefix
 
 # repo root / site-packages dir so `-m docsort.cli` resolves from subprocess
 PKG_PARENT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -258,7 +258,7 @@ def _run_view(page: "ft.Page") -> "ft.Control":
         f = folder.value.strip()
         if not os.path.isdir(f):
             status.value = f"not a folder: {f}"; status.color = FAIL; page.update(); return
-        cmd = [sys.executable, "-m", "docsort.cli", f, "--apply-journal"]
+        cmd = cli_prefix() + [f, "--apply-journal"]
         if not t_misc.value:
             cmd.append("--no-misc")
         if t_skip.value:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "docsort"
-version = "0.12.0"
+version = "0.12.1"
 description = "Local-LLM document tagger + sorter: classify academic docs by stream/subject and move by filename prefix, fully offline. CLI + modern Flet GUI."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -32,6 +32,8 @@ Issues = "https://github.com/Naivedya-sahu/docsort/issues"
 
 [project.scripts]
 docsort = "docsort.cli:main"
+
+[project.gui-scripts]
 docsort-gui = "docsort.gui:main"
 
 [tool.setuptools.packages.find]
