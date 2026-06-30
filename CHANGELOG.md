@@ -2,6 +2,20 @@
 
 All notable changes. Newest on top.
 
+## [0.11.1] — 2026-06-30
+### Fixed
+- **Folder picker** — in Flet 0.85 `FilePicker` is a *service*; it was added to `page.overlay`, so its
+  method listener never registered and `get_directory_path()` timed out after 10s. Now registered on
+  `page.services` (one reusable picker per view — also fixes the overlay accretion from repeated browses).
+- **Model dropdown labels** — options set only a `key` (no display `text`), which can render blank in
+  Flet 0.85. Options now set `text` too (Run view model + frontier dropdowns).
+- **Blocking model refresh** — `available_models()` (an HTTP call to LM Studio) ran on the UI thread on
+  the refresh button / host blur, briefly freezing the window when the host was slow/absent. Now runs on a
+  background thread and updates via `page.run_thread`.
+### Build
+- Packaged exe now bundles the `docsort` package + its `data/` (was `ModuleNotFoundError: docsort` at
+  runtime): `flet pack` invoked with the package collected and data added. See `build-exe.bat` / release.yml.
+
 ## [0.11.0] — 2026-06-30
 ### Changed
 - **GUI rebuilt on Flet** (Python) — modern Discord-like dark UI with a left nav rail

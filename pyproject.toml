@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "docsort"
-version = "0.11.0"
+version = "0.11.1"
 description = "Local-LLM document tagger + sorter: classify academic docs by stream/subject and move by filename prefix, fully offline. CLI + modern Flet GUI."
 readme = "README.md"
 license = { file = "LICENSE" }
