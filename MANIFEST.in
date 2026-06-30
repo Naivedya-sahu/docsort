@@ -1,8 +1,8 @@
 include LICENSE
 include README.md
-include GUIDE.md
-include CHANGELOG.md
-include TROUBLESHOOTING.md
+include docs/GUIDE.md
+include docs/CHANGELOG.md
+include docs/TROUBLESHOOTING.md
 include requirements.txt
 include run.bat
 recursive-include docsort/data *

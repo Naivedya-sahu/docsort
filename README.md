@@ -185,9 +185,10 @@ Run dedup FIRST so the model never reads duplicate copies.
 | `docsort/config.py` | config + per-user file resolution |
 | `docsort/data/` | bundled templates: `TAGS.md`, `system_prompt.md`, `config.example.json` |
 | `run.bat` | cmd/PowerShell launcher (uses repo `.venv`) |
-| `GUIDE.md` | detailed runbook — tiers, escalation, backends, flags |
-| `TROUBLESHOOTING.md` | host/firewall/port 1234 and common fixes |
-| `CHANGELOG.md` | version history |
+| `docs/GUIDE.md` | detailed runbook — tiers, escalation, backends, flags |
+| `docs/TROUBLESHOOTING.md` | host/firewall/port 1234 and common fixes |
+| `docs/CHANGELOG.md` | version history |
+| `docs/HANDOFF.md` | session/project state handoff |
 | `docs/MODEL-GUIDE.md` | model shortlist + LM Studio tuning + benchmark method |
 | `docs/ROADMAP.md` | shipped vs. planned vs. separate-project work |
 | `docs/archive/` | design notes + plans + mockups (council, taxonomy-generator, gui-vision, specs, html mockups) |

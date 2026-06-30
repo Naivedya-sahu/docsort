@@ -1,8 +1,8 @@
 # docsort — Roadmap
 
 Living document. Tracks what's shipped, what's planned, and what is a *separate* project vs. in-repo work.
-Full historical state lives in [`HANDOFF.md`](../HANDOFF.md); per-release detail in
-[`CHANGELOG.md`](../CHANGELOG.md).
+Full historical state lives in [`HANDOFF.md`](HANDOFF.md); per-release detail in
+[`CHANGELOG.md`](CHANGELOG.md).
 
 ## Shipped
 
