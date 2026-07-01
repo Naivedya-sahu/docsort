@@ -57,7 +57,8 @@ def edit_file(p):
 EXT_TEXT={".pdf",".txt",".md",".docx",".pptx",".ppt",".doc"}
 MIN_TEXT=80; DEEP_PAGES=5; DEEP_CAP=4000; DPI=120
 STREAMS=set(); SUBJECTS=set(); TYPES=set()   # filled from TAGS.md
-STREAM_CENTROIDS={}; SUBJECT_CENTROIDS={}    # filled from TAGS.md when --embed-threshold is set
+STREAM_CENTROIDS={}; SUBJECT_CENTROIDS={}    # always filled from TAGS.md by setup() — non-vision
+                                              # files are classified by EMBED alone, not opt-in
 _STATS={"ttoks":0,"ok":0,"empty":0}          # per-file model accounting (reset each file)
 
 def journal_done(root):
@@ -547,7 +548,7 @@ def main(argv=None):
         db_path=os.path.join(a.root,"_docsort_index.db")
         conn=open_index(db_path)
         scan_root(conn,a.root); embed_index(conn)
-        clean_rpt=generate_clean_report(conn)
+        clean_rpt=generate_clean_report(conn,a.root)
         conn.close()
         print(f"Exact-duplicate groups: {len(clean_rpt['exact_duplicates'])}")
         print(f"Duplicate subtree groups: {len(clean_rpt['duplicate_subtrees'])}")
@@ -560,7 +561,7 @@ def main(argv=None):
         db_path=os.path.join(a.root,"_docsort_index.db")
         conn=open_index(db_path)
         scan_root(conn,a.root); embed_index(conn)
-        clean_rpt=generate_clean_report(conn)
+        clean_rpt=generate_clean_report(conn,a.root)
         log_path=os.path.join(a.root,"_docsort_clean_log.jsonl")
         moves=apply_clean(conn,clean_rpt,a.apply_clean_dir,dry_run=False,log_path=log_path)
         conn.close()

@@ -22,11 +22,15 @@ def subtree_signature(conn, dirpath):
     return frozenset((path[len(prefix):], filehash) for path, filehash in rows)
 
 
-def find_duplicate_subtrees(conn):
-    """Group directories sharing an identical (non-empty) subtree signature."""
-    from docsort.index import list_directories
+def find_duplicate_subtrees(conn, root):
+    """Group directories (scoped to `root`) sharing an identical (non-empty)
+    subtree signature. Scoped via DirectoryTree, not a raw directory listing —
+    an unscoped listing also returns filesystem ancestors above the scanned
+    root, which must never be treated as dedup candidates."""
+    from docsort.tree import DirectoryTree
+    tree = DirectoryTree.from_index(conn, root)
     by_signature = {}
-    for d in list_directories(conn):
+    for d in tree.all_dirs():
         sig = subtree_signature(conn, d)
         if not sig:
             continue

@@ -61,7 +61,7 @@ def test_find_duplicate_subtrees_groups_identical_dirs(tmp_path):
     conn = open_index(str(db_path))
     scan_directory(conn, str(root))
 
-    groups = find_duplicate_subtrees(conn)
+    groups = find_duplicate_subtrees(conn, str(root))
     matched = [g for g in groups if len(g) >= 2]
     assert len(matched) == 1
     assert {os.path.basename(p) for p in matched[0]} == {"TreeA", "TreeB"}

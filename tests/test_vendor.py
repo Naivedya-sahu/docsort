@@ -17,7 +17,7 @@ def test_find_vendor_dumps_matches_master_main_suffix(tmp_path):
     conn = open_index(str(db_path))
     scan_directory(conn, str(root))
 
-    flagged = find_vendor_dumps(conn)
+    flagged = find_vendor_dumps(conn, str(root))
     names = {os.path.basename(p) for p in flagged}
     assert names == {"eagle_libraries-master", "my-project-main"}
     conn.close()
