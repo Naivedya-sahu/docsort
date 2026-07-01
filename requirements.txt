@@ -8,6 +8,9 @@ pymupdf>=1.24        # PDF text extraction + page-to-image render  (REQUIRED)
 python-docx>=1.1     # .docx text                                   (optional, extra: office)
 python-pptx>=0.6     # .pptx text                                   (optional, extra: office)
 pywin32>=306         # .doc (old binary Word) text — Windows + Word  (optional, extra: doc)
+sentence-transformers>=3.0  # GPU-capable name embeddings for --recon-report (optional, extra: recon)
+                             # pulls in torch — NOT in the `all` extra deliberately (heaviest dep by
+                             # far); recon falls back to the built-in stdlib embedder without it.
 # The GUI uses Tkinter from the standard library (ships with CPython on Windows).
 # Everything else is stdlib (urllib, csv, json, base64, subprocess) — no other pip deps.
 

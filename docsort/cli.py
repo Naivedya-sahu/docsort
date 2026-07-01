@@ -493,6 +493,10 @@ def add_args(ap):
                     help="build the index (if needed) and print thin-chain flatten proposals, then exit")
     ap.add_argument("--apply-reorg",dest="apply_reorg",action="store_true",
                     help="apply the reorg-suggester's thin-chain flatten proposals")
+    ap.add_argument("--recon-report",dest="recon_report",action="store_true",
+                    help="name-only, whole-tree, no-model, no-content-read triage pass: suggests a "
+                         "high-level STREAM/SUBJECT for every file and folder from its name alone, "
+                         "before Scan/Clean/Classify touch anything; then exit")
     ap.add_argument("--stream-threshold",dest="stream_threshold",type=float,default=None,
                     help="STREAM-axis confidence cutoff (0.0-1.0) for the model-free EMBED classifier "
                          "used on all non-vision files (default from config, currently 0.3)")
@@ -573,6 +577,22 @@ def main(argv=None):
         log_path=os.path.join(a.root,"_docsort_reorg_log.jsonl")
         applied=apply_moves(moves,dry_run=False,log_path=log_path)
         print(f"Flattened {len(applied)} files across {len(chains)} thin chains (log: {log_path})")
+        return
+    if a.recon_report:
+        from docsort.recon import NameEmbedder, recon_scan, classify_names
+        from docsort.cascade import build_centroids
+        s,su,_ty=load_tags(a.tags)
+        stream_centroids=build_centroids(s); subject_centroids=build_centroids(su)
+        embedder=NameEmbedder()
+        entries=recon_scan(a.root)
+        results=classify_names(entries,stream_centroids,subject_centroids,embedder)
+        folders=[r for r in results if r["is_dir"]]
+        print(f"Recon backend: {embedder.backend}")
+        print(f"Folders scanned: {len(folders)} · Files scanned: {len(results)-len(folders)}")
+        print("\nFolder-level suggestions:")
+        for r in sorted(folders,key=lambda r:r["path"]):
+            print(f"  {r['name']}/  -> {r['stream']}-{r['subject']} "
+                  f"(stream {r['stream_score']:.2f}, subject {r['subject_score']:.2f})")
         return
     if a.apply_journal:                                      # offline: replay audited decisions, no model
         apply_journal(a.root, misc=bool(a.misc), skip_unknown=bool(a.skip_unknown)); return
