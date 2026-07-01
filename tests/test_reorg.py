@@ -1,5 +1,8 @@
+import json
+import os
+
 from docsort.index import open_index, scan_directory
-from docsort.reorg import find_thin_chains, propose_flatten
+from docsort.reorg import find_thin_chains, propose_flatten, apply_moves
 
 
 def test_find_thin_chains_detects_single_child_nesting(tmp_path):
@@ -55,4 +58,29 @@ def test_propose_flatten_moves_end_contents_to_start(tmp_path):
     src, dst = moves[0]
     assert src == str(root / "A" / "B" / "C" / "file.txt")
     assert dst == str(root / "file.txt")
+    conn.close()
+
+
+def test_apply_moves_real_run_moves_and_logs(tmp_path):
+    root = tmp_path / "data"
+    (root / "A" / "B" / "C").mkdir(parents=True)
+    (root / "A" / "B" / "C" / "file.txt").write_bytes(b"content")
+
+    db_path = tmp_path / "index.db"
+    conn = open_index(str(db_path))
+    scan_directory(conn, str(root))
+    chains = find_thin_chains(conn, str(root), min_length=2)
+    moves = propose_flatten(conn, chains)
+
+    log_path = tmp_path / "_docsort_reorg_log.jsonl"
+    applied = apply_moves(moves, dry_run=False, log_path=str(log_path))
+
+    assert applied == moves
+    src, dst = moves[0]
+    assert not os.path.exists(src)
+    assert os.path.exists(dst)
+    lines = log_path.read_text().strip().splitlines()
+    assert len(lines) == 1
+    row = json.loads(lines[0])
+    assert row["src"] == src and row["dst"] == dst
     conn.close()

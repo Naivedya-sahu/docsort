@@ -1,4 +1,7 @@
+import json
 import os
+import shutil
+import time
 
 from docsort.index import list_directories
 
@@ -57,3 +60,26 @@ def propose_flatten(conn, chains):
                 dst = os.path.join(start, rel)
                 moves.append((f, dst))
     return moves
+
+
+def apply_moves(moves, dry_run=True, log_path=None):
+    """Execute a (src, dst) move list, logging each move as JSONL. dry_run=True is a no-op
+    that just returns the list unchanged (same dry-run-by-default pattern as clean.apply_clean)."""
+    if dry_run:
+        return moves
+
+    log_f = open(log_path, "a", encoding="utf-8") if log_path else None
+    applied = []
+    try:
+        for src, dst in moves:
+            if not os.path.exists(src):
+                continue
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.move(src, dst)
+            applied.append((src, dst))
+            if log_f:
+                log_f.write(json.dumps({"src": src, "dst": dst, "ts": time.time()}) + "\n")
+    finally:
+        if log_f:
+            log_f.close()
+    return applied
