@@ -18,15 +18,25 @@ Settings: `temperature=0`, `max_tokens=24`. Reply is one line, e.g. `CW 12EMAG n
 1. **EMBED** — the default and only tier for non-vision files. A stdlib hashing-trick embedding
    (no ML dependency) of filename+folder+extracted text is matched against zero-shot centroids built
    from `TAGS.md`'s own STREAM/SUBJECT descriptions. Two independent confidence cutoffs
-   (`--stream-threshold`, `--subject-threshold` — see §5) — clears both → tagged, `source=embed`. A PDF
-   whose first pass misses gets one more try against a deeper 5-page extract (`source=embed5`, still no
-   model call). Below cutoff on either axis → `stream=CW subject=99UNS source=embed-unsure`, left for
-   `--review`/manual promotion, same as any other unsure file — **never escalated to a model.**
+   (`--stream-threshold`, `--subject-threshold` — see §5), checked **per axis, not jointly**:
+   - **Both clear** → tagged, `source=embed`, `conf=high`.
+   - **Only one clears** → the confident axis's real answer is kept; the other falls back to its own
+     safe default (`STREAM→CW`, `SUBJECT→99UNS`) — `source=embed-partial`, `conf=low`. A confident
+     STREAM or SUBJECT guess is **never discarded** just because the other axis missed its bar (a
+     real bug, fixed in production: everything was landing on a hardcoded `CW-99UNS` even when one
+     axis clearly knew the answer).
+   - **Neither clears** → `stream=CW subject=99UNS source=embed-unsure`.
+
+   A PDF whose first pass isn't fully confident gets one more try against a deeper 5-page extract
+   (`source=embed5`/`embed5-partial`, still no model call) if that reads as good or better. Anything
+   less than full confidence is left for `--review`/manual promotion, same as any other unsure file —
+   **never escalated to a model.**
 2. **VISION** *(the one exception)* — only when there's no extractable text at all (scanned/handwritten
    PDF) and `--vision` is set: render page 1 → vision model; still `99UNS`? page 3 → `vision3`. This is
    the only path with a real processing-time cost, since there's nothing reliable to embed.
-Trust order: `embed > embed5 > vision > vision3` (the `source` column). `TEXT`/`ESCALATE`/`FRONTIER`
-(pre-v0.13.0 model-calling tiers) no longer exist on the non-vision path — see CHANGELOG v0.13.0.
+Trust order: `embed > embed5 > embed-partial > embed5-partial > vision > vision3 > embed-unsure` (the
+`source` column). `TEXT`/`ESCALATE`/`FRONTIER` (pre-v0.13.0 model-calling tiers) no longer exist on the
+non-vision path — see CHANGELOG v0.13.0.
 
 ## 2.5 Drive-organizer features (v0.13.0+)
 
@@ -101,7 +111,7 @@ dry-run results without re-classifying).
 | `--stats` | print lifetime totals from `%APPDATA%/docsort/index.jsonl`, then exit |
 | `--list-models` | list models loaded in LM Studio (at `--host`), then exit |
 | `--edit-tags` | open your `TAGS.md` in an editor, then exit |
-| `--stream-threshold` / `--subject-threshold` | EMBED-tier confidence cutoffs (0.0-1.0), one per axis (config defaults: 0.3 / 0.45 — see §7 for why they're separate) |
+| `--stream-threshold` / `--subject-threshold` | EMBED-tier confidence cutoffs (0.0-1.0), one per axis (config defaults: 0.2 / 0.3 — see §7 for why they're separate, and why they're this low) |
 | `--scan` | build/refresh the ground-truth index (`_docsort_index.db`) for root, then exit — no model, no classification |
 | `--clean-report` | index (if needed) + print a dedup/vendor-dump report (exact-hash, duplicate-subtree, near-duplicate, vendor-dump groups), then exit |
 | `--apply-clean DIR` | apply the Clean report's findings — quarantine-move confirmed items into `DIR`, journal-backed (`_docsort_clean_log.jsonl`) |
@@ -134,11 +144,18 @@ hint instead of mislabeling the rest `99UNS`. Each run also emits `PROGRESS i/N 
 - **EMBED thresholds are two separate knobs, not one, deliberately.** Real testing against the full
   `TAGS.md` vocabulary found STREAM and SUBJECT scores don't move together — e.g. BJT-heavy text scores
   ~0.7 on SUBJECT but only ~0.25 on STREAM, since STREAM's descriptions are short/generic and SUBJECT's
-  are technical/specific. A shared threshold systematically rejected one axis. Config defaults
-  (`stream_embed_threshold: 0.3`, `subject_embed_threshold: 0.45`) are a starting point — retune against
-  your own corpus via `--report`/`TAG-REVIEW.md`, the same workflow already used to promote `~LABEL`
-  proposals. More files landing in `99UNS` than expected usually means one threshold is too strict for
-  your material, not a bug.
+  are technical/specific. A shared threshold systematically rejected one axis.
+- **There is a real, hard ceiling on this embedding's precision/recall, not just a tuning gap.**
+  Testing realistic filenames (not just long content samples) found no single threshold pair that
+  both accepts most real content *and* rejects gibberish — the stdlib hashing-trick's semantic
+  separation just isn't that clean. Config defaults (`stream_embed_threshold: 0.2`,
+  `subject_embed_threshold: 0.3`) are chosen to eliminate total-failure cases (every file landing on
+  a hardcoded `CW-99UNS`) at the cost of occasionally over-confident tags on noise — the review/
+  promote workflow (`--report`/`TAG-REVIEW.md`, same one used for `~LABEL` proposals) is the intended
+  safety net for that, not a bug to work around. Retune against your own corpus; if it's still not
+  good enough, the real fix is a better embedding (e.g. the GPU-capable `sentence-transformers`
+  backend already built for `--recon-report`'s `NameEmbedder` could be extended to `classify()` too
+  — not done yet, deferred until proven necessary).
 
 ## 8. Reviewing & reversibility
 - `--review` → TAG-REVIEW.md: distribution, proposed (`~`) tags, low-confidence list.

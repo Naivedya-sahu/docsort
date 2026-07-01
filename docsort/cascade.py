@@ -8,8 +8,12 @@ def build_centroids(label_descriptions):
 
 
 def classify_by_embed(text, stream_centroids, subject_centroids, stream_threshold, subject_threshold):
-    """Returns (stream, subject, stream_score, subject_score) if each axis clears its OWN
-    threshold, else None (caller marks the file for review instead of guessing).
+    """Returns (stream, subject, stream_score, subject_score, stream_confident, subject_confident)
+    -- always, never an all-or-nothing None. Each axis's own guess and confidence are
+    reported independently; a real, confident answer on one axis must never be discarded
+    just because the other axis missed its bar (a real bug: a caller that only accepted a
+    joint AND of both axes was silently replacing a confident STREAM guess with a hardcoded
+    default whenever SUBJECT alone was unsure).
 
     Independent per-axis thresholds, not a shared one: STREAM descriptions are short and
     generic (real STREAM scores run ~0.2-0.7), SUBJECT descriptions are technical and
@@ -18,6 +22,5 @@ def classify_by_embed(text, stream_centroids, subject_centroids, stream_threshol
     vec = embed_text(text)
     stream, stream_score = classify_by_centroid(vec, stream_centroids)
     subject, subject_score = classify_by_centroid(vec, subject_centroids)
-    if stream_score < stream_threshold or subject_score < subject_threshold:
-        return None
-    return stream, subject, stream_score, subject_score
+    return (stream, subject, stream_score, subject_score,
+            stream_score >= stream_threshold, subject_score >= subject_threshold)

@@ -174,6 +174,35 @@ def test_classify_non_vision_low_confidence_marks_99uns_no_model_call(tmp_path, 
     assert src == "embed-unsure"
 
 
+def test_classify_keeps_confident_stream_when_subject_unsure(tmp_path, monkeypatch):
+    """Real bug found in production: a confident STREAM guess was silently discarded and
+    replaced with a hardcoded ("CW","99UNS") whenever SUBJECT alone missed its threshold --
+    even when STREAM was clearly right. GATE-flavoured text with no clear EE subject must
+    tag as GATE-99UNS (partial, still flagged for review), not CW-99UNS."""
+    from docsort.cascade import build_centroids
+    monkeypatch.setattr(cli, "STREAM_CENTROIDS", build_centroids({
+        "CW": "CW coursework degree material notes assignments lab",
+        "GATE": "GATE competitive exam prep syllabus formula book previous year questions",
+    }))
+    monkeypatch.setattr(cli, "SUBJECT_CENTROIDS", build_centroids({
+        "04BJT": "04BJT bjt bipolar biasing CE CB CC h-params transistor",
+    }))
+
+    def boom(*args, **kwargs):
+        raise AssertionError("llm() must not be called for non-vision files")
+    monkeypatch.setattr(cli, "llm", boom)
+
+    f = tmp_path / "gate_formula_book.txt"
+    f.write_text("GATE EC formula book previous year questions exam prep syllabus", encoding="utf-8")
+    a = argparse.Namespace(vision=False, stream_threshold=0.3, subject_threshold=0.45,
+                           backend="local", frontier="none")
+
+    st, su, ty, cf, src = cli.classify(a, "sysprompt", str(f), "gate_formula_book.txt", "")
+    assert st == "GATE"       # the real, confident answer -- must survive
+    assert su == "99UNS"      # subject genuinely unclear here, correctly flagged
+    assert "partial" in src
+
+
 def test_classify_vision_path_still_calls_model(tmp_path, monkeypatch):
     """Vision tier (scanned/handwritten, no extractable text) is the one exception —
     still model-based, per the "non-vision runs only" scope of the no-model change."""
