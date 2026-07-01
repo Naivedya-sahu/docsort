@@ -32,3 +32,42 @@ def find_duplicate_subtrees(conn):
             continue
         by_signature.setdefault(sig, []).append(d)
     return [dirs for dirs in by_signature.values() if len(dirs) >= 2]
+
+
+def find_near_duplicates(conn, threshold=0.8):
+    """Cluster files whose embeddings exceed threshold cosine similarity.
+    Review-only signal — highest false-positive risk of the three dedup layers,
+    never auto-applied. O(n^2) pairwise; fine at personal-drive scale, revisit
+    with an ANN index if this ever needs to run over millions of files."""
+    from docsort.embed import cosine_similarity
+
+    rows = conn.execute(
+        "SELECT path, embedding FROM files WHERE embedding IS NOT NULL"
+    ).fetchall()
+    items = [(path, tuple(float(x) for x in emb.split(","))) for path, emb in rows]
+
+    parent = {path: path for path, _ in items}
+
+    def find(p):
+        while parent[p] != p:
+            parent[p] = parent[parent[p]]
+            p = parent[p]
+        return p
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    for i in range(len(items)):
+        for j in range(i + 1, len(items)):
+            path_a, vec_a = items[i]
+            path_b, vec_b = items[j]
+            if cosine_similarity(vec_a, vec_b) >= threshold:
+                union(path_a, path_b)
+
+    groups = {}
+    for path, _ in items:
+        root = find(path)
+        groups.setdefault(root, []).append(path)
+    return [paths for paths in groups.values() if len(paths) >= 2]

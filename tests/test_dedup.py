@@ -1,7 +1,9 @@
 import os
 
-from docsort.index import open_index, scan_directory
-from docsort.dedup import find_exact_duplicates, subtree_signature, find_duplicate_subtrees
+from docsort.index import open_index, scan_directory, embed_index
+from docsort.dedup import (
+    find_exact_duplicates, subtree_signature, find_duplicate_subtrees, find_near_duplicates,
+)
 
 
 def test_find_exact_duplicates_groups_identical_content(tmp_path):
@@ -63,4 +65,41 @@ def test_find_duplicate_subtrees_groups_identical_dirs(tmp_path):
     matched = [g for g in groups if len(g) >= 2]
     assert len(matched) == 1
     assert {os.path.basename(p) for p in matched[0]} == {"TreeA", "TreeB"}
+    conn.close()
+
+
+def test_find_near_duplicates_clusters_similar_filenames(tmp_path):
+    root = tmp_path / "data"
+    root.mkdir()
+    (root / "Calculus_Notes.pdf").write_bytes(b"a")
+    (root / "Calculus_Notes_v2.pdf").write_bytes(b"b")
+    (root / "Fourier_Transform.pdf").write_bytes(b"c")
+
+    db_path = tmp_path / "index.db"
+    conn = open_index(str(db_path))
+    scan_directory(conn, str(root))
+    embed_index(conn)
+
+    clusters = find_near_duplicates(conn, threshold=0.5)
+    matched = [c for c in clusters if len(c) >= 2]
+    assert len(matched) >= 1
+    names = {os.path.basename(p) for p in matched[0]}
+    assert "Calculus_Notes.pdf" in names or "Calculus_Notes_v2.pdf" in names
+    conn.close()
+
+
+def test_find_near_duplicates_empty_below_threshold(tmp_path):
+    root = tmp_path / "data"
+    root.mkdir()
+    (root / "Calculus.pdf").write_bytes(b"a")
+    (root / "Fourier.pdf").write_bytes(b"b")
+
+    db_path = tmp_path / "index.db"
+    conn = open_index(str(db_path))
+    scan_directory(conn, str(root))
+    embed_index(conn)
+
+    clusters = find_near_duplicates(conn, threshold=0.999)
+    matched = [c for c in clusters if len(c) >= 2]
+    assert matched == []
     conn.close()
