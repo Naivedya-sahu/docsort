@@ -535,55 +535,43 @@ def main(argv=None):
     if a.report: report(a.root); return                      # offline
     if a.undo: undo(a.root); return                          # offline
     if a.scan:
-        from docsort.index import open_index, scan_root
-        db_path=os.path.join(a.root,"_docsort_index.db")
-        conn=open_index(db_path)
-        count=scan_root(conn,a.root)
-        conn.close()
-        print(f"Indexed {count} entries into {db_path}")
+        from docsort.index import index_session
+        with index_session(a.root) as conn:
+            count=conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
+        print(f"Indexed {count} entries into {os.path.join(a.root,'_docsort_index.db')}")
         return
     if a.clean_report:
-        from docsort.index import open_index, scan_root, embed_index
+        from docsort.index import index_session
         from docsort.clean import generate_clean_report
-        db_path=os.path.join(a.root,"_docsort_index.db")
-        conn=open_index(db_path)
-        scan_root(conn,a.root); embed_index(conn)
-        clean_rpt=generate_clean_report(conn,a.root)
-        conn.close()
+        with index_session(a.root,need_embeddings=True) as conn:
+            clean_rpt=generate_clean_report(conn,a.root)
         print(f"Exact-duplicate groups: {len(clean_rpt['exact_duplicates'])}")
         print(f"Duplicate subtree groups: {len(clean_rpt['duplicate_subtrees'])}")
         print(f"Near-duplicate groups: {len(clean_rpt['near_duplicates'])}")
         print(f"Vendor-dump dirs: {len(clean_rpt['vendor_dumps'])}")
         return
     if a.apply_clean_dir:
-        from docsort.index import open_index, scan_root, embed_index
+        from docsort.index import index_session
         from docsort.clean import generate_clean_report, apply_clean
-        db_path=os.path.join(a.root,"_docsort_index.db")
-        conn=open_index(db_path)
-        scan_root(conn,a.root); embed_index(conn)
-        clean_rpt=generate_clean_report(conn,a.root)
         log_path=os.path.join(a.root,"_docsort_clean_log.jsonl")
-        moves=apply_clean(conn,clean_rpt,a.apply_clean_dir,dry_run=False,log_path=log_path)
-        conn.close()
+        with index_session(a.root,need_embeddings=True) as conn:
+            clean_rpt=generate_clean_report(conn,a.root)
+            moves=apply_clean(conn,clean_rpt,a.apply_clean_dir,dry_run=False,log_path=log_path)
         print(f"Moved {len(moves)} items to {a.apply_clean_dir} (log: {log_path})")
         return
     if a.reorg_report or a.apply_reorg:
-        from docsort.index import open_index, scan_root
+        from docsort.index import index_session
         from docsort.reorg import find_thin_chains, propose_flatten, apply_moves
-        db_path=os.path.join(a.root,"_docsort_index.db")
-        conn=open_index(db_path)
-        scan_root(conn,a.root)
-        chains=find_thin_chains(conn,a.root)
-        moves=propose_flatten(conn,chains)
+        with index_session(a.root) as conn:
+            chains=find_thin_chains(conn,a.root)
+            moves=propose_flatten(conn,chains)
         if a.reorg_report:
-            conn.close()
             print(f"Thin chains found: {len(chains)}")
             for c in chains: print(f"  {c['start']} -> {c['end']} (length {c['length']})")
             print(f"Proposed moves: {len(moves)}")
             return
         log_path=os.path.join(a.root,"_docsort_reorg_log.jsonl")
         applied=apply_moves(moves,dry_run=False,log_path=log_path)
-        conn.close()
         print(f"Flattened {len(applied)} files across {len(chains)} thin chains (log: {log_path})")
         return
     if a.apply_journal:                                      # offline: replay audited decisions, no model
