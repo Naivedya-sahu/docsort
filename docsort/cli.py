@@ -57,6 +57,7 @@ def edit_file(p):
 EXT_TEXT={".pdf",".txt",".md",".docx",".pptx",".ppt",".doc"}
 MIN_TEXT=80; DEEP_PAGES=5; DEEP_CAP=4000; DPI=120
 STREAMS=set(); SUBJECTS=set(); TYPES=set()   # filled from TAGS.md
+STREAM_CENTROIDS={}; SUBJECT_CENTROIDS={}    # filled from TAGS.md when --embed-threshold is set
 _STATS={"ttoks":0,"ok":0,"empty":0}          # per-file model accounting (reset each file)
 
 def journal_done(root):
@@ -228,6 +229,12 @@ def decide(out):
 def classify(a,sysp,full,fn,rel):
     ispdf=full.lower().endswith(".pdf")
     snip=doc_text(full)
+    if a.embed_threshold is not None and STREAM_CENTROIDS and SUBJECT_CENTROIDS:
+        from docsort.cascade import classify_by_embed
+        r=classify_by_embed(f"{fn} {rel} {snip}",STREAM_CENTROIDS,SUBJECT_CENTROIDS,a.embed_threshold)
+        if r is not None:
+            st,su,_,_=r
+            return st,su,"misc","high","embed"
     u=lambda txt:f"Filename: {fn}\nFolder: {rel}\nText:\n{txt[:DEEP_CAP]}\n\nAnswer (STREAM SUBJECT TYPE CONF):"
     if len(snip.strip())>=MIN_TEXT:
         st,su,ty,cf=decide(llm(a,a.backend,sysp,u(snip))); src="text"
@@ -447,8 +454,12 @@ def stats():
     for k,c in tot.most_common(25): print(f"  {k}: {c}")
 
 def setup(a):
-    global STREAMS,SUBJECTS,TYPES
+    global STREAMS,SUBJECTS,TYPES,STREAM_CENTROIDS,SUBJECT_CENTROIDS
     s,su,ty=load_tags(a.tags); STREAMS=set(s); SUBJECTS=set(su); TYPES=set(ty)
+    STREAM_CENTROIDS,SUBJECT_CENTROIDS={},{}
+    if getattr(a,"embed_threshold",None) is not None:
+        from docsort.cascade import build_centroids
+        STREAM_CENTROIDS=build_centroids(s); SUBJECT_CENTROIDS=build_centroids(su)
     return build_system(a.prompt,s,su,ty)
 
 def add_args(ap):
@@ -478,6 +489,8 @@ def add_args(ap):
     ap.add_argument("--report",action="store_true",help="(re)build DOCSORT-REPORT.md from the journal + update global index (offline)")
     ap.add_argument("--undo",action="store_true",help="reverse the renames/moves recorded in the journal")
     ap.add_argument("--scan",action="store_true",help="build/refresh the ground-truth index for root, then exit (no classification)")
+    ap.add_argument("--embed-threshold",dest="embed_threshold",type=float,default=None,
+                    help="enable the EMBED cascade tier at this cosine-similarity threshold (0.0-1.0); unset = disabled")
     ap.add_argument("--apply-journal",dest="apply_journal",action="store_true",
                     help="apply a prior dry-run's audited decisions from the journal (rename/move only, no model calls)")
     ap.add_argument("--stats",action="store_true",help="print lifetime stats from the global index, then exit")

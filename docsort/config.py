@@ -40,6 +40,7 @@ DEFAULTS = {
     "options": {
         "vision": True, "apply": False,
         "min_text": 80, "deep_pages": 5, "deep_cap": 4000, "dpi": 120,
+        "embed_threshold": None,   # None = disabled; set 0.0-1.0 to enable the EMBED cascade tier
     },
 }
 
@@ -117,6 +118,7 @@ def arg_defaults(cfg):
         "api": resolve_api(cfg), "model": m["model"], "vision_model": m["vision_model"],
         "backend": m["backend"], "frontier": m["frontier"],
         "vision": bool(o.get("vision", False)), "apply": bool(o.get("apply", False)),
+        "embed_threshold": o.get("embed_threshold"),
     }
     glob = {"MIN_TEXT": o.get("min_text", 80), "DEEP_PAGES": o.get("deep_pages", 5),
             "DEEP_CAP": o.get("deep_cap", 4000), "DPI": o.get("dpi", 120)}
