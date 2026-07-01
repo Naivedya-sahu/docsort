@@ -1,5 +1,5 @@
 from docsort.index import open_index, scan_directory
-from docsort.reorg import find_thin_chains
+from docsort.reorg import find_thin_chains, propose_flatten
 
 
 def test_find_thin_chains_detects_single_child_nesting(tmp_path):
@@ -35,4 +35,24 @@ def test_find_thin_chains_respects_min_length(tmp_path):
 
     chains = find_thin_chains(conn, str(root), min_length=3)
     assert chains == []
+    conn.close()
+
+
+def test_propose_flatten_moves_end_contents_to_start(tmp_path):
+    root = tmp_path / "data"
+    # root itself has only one child (A) -> the whole chain, including root, is thin
+    (root / "A" / "B" / "C").mkdir(parents=True)
+    (root / "A" / "B" / "C" / "file.txt").write_bytes(b"content")
+
+    db_path = tmp_path / "index.db"
+    conn = open_index(str(db_path))
+    scan_directory(conn, str(root))
+
+    chains = find_thin_chains(conn, str(root), min_length=2)
+    moves = propose_flatten(conn, chains)
+
+    assert len(moves) == 1
+    src, dst = moves[0]
+    assert src == str(root / "A" / "B" / "C" / "file.txt")
+    assert dst == str(root / "file.txt")
     conn.close()

@@ -38,3 +38,22 @@ def find_thin_chains(conn, root, min_length=3):
         if length >= min_length:
             chains.append({"start": start, "end": cur, "length": length})
     return chains
+
+
+def propose_flatten(conn, chains):
+    """Dry-run move list: for each chain, move the terminal folder's direct files up to
+    the chain's start folder, collapsing the thin wrappers in between. Caller applies via
+    the existing shutil.move + journal pattern — this function only proposes."""
+    moves = []
+    rows = conn.execute("SELECT path FROM files").fetchall()
+    all_files = [p for (p,) in rows]
+    for chain in chains:
+        end = chain["end"]
+        start = chain["start"]
+        prefix = end + os.sep
+        for f in all_files:
+            if f.startswith(prefix):
+                rel = f[len(prefix):]
+                dst = os.path.join(start, rel)
+                moves.append((f, dst))
+    return moves
