@@ -46,8 +46,8 @@ Should list the loaded models. Then `docsort ... --host HOME` works.
 ## Other quick ones
 | Symptom | Fix |
 |---|---|
-| `[warn] model server unreachable` | host down / firewall — see above. Script still runs but every file → 99UNS. |
-| Configured model not used | it wasn't loaded; auto-resolve picked a loaded one (see the `[model] ... -> ...` line). Load the model in LM Studio to force it. |
+| `[warn] model server unreachable` | host down / firewall — see above. **As of v0.13.0 this only affects VISION-tier files** (scanned/handwritten, no extractable text) — non-vision files classify via the model-free EMBED tier regardless and are unaffected. |
+| Configured model not used | it wasn't loaded; auto-resolve picked a loaded one (see the `[model] ... -> ...` line). Load the model in LM Studio to force it. Only matters for VISION-tier files — see above. |
 | GUI won't open | needs Tkinter — bundled with standard CPython on Windows; on Linux `apt install python3-tk`. |
 | PDFs skipped | reinstall so `pymupdf` is present. `.docx/.pptx` → `pip install "docsort[office]"`. |
-| Everything 99UNS | model too weak — use a 7B/8B vision model, or `--frontier claude` for hard cases. |
+| Everything 99UNS | **not a model-strength issue anymore** — non-vision files are classified by EMBED alone. Most likely one of `--stream-threshold`/`--subject-threshold` is too strict for your material; retune against a real `--report` run (see GUIDE.md §7). For scanned/handwritten (VISION-tier) files specifically, a weak vision model or `--frontier claude` still applies. |

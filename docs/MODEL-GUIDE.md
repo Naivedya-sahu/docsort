@@ -4,6 +4,13 @@ Goal: a more accurate/faster VL model for document reading + steerable tagging, 
 hardware (laptop 3050 4GB primary; desktop ~8GB secondary), staying in the LM Studio GGUF
 stack. You measured ~40 tok/s on Qwen3-VL-8B / Qwen2.5-VL-7B.
 
+**As of v0.13.0, model choice only matters for VISION-tier files** (scanned/handwritten, no
+extractable text). Non-vision files classify via the model-free EMBED tier — no model loaded,
+no tokens spent, regardless of which model is running in LM Studio. Everything below (model
+pick, LM Studio tuning, benchmarking) is about the VISION tier specifically, not the whole
+pipeline anymore. If your ground-truth set is mostly non-vision files, benchmarking against it
+will show ~0 tok/s and near-instant wall time — that's correct behavior, not a broken run.
+
 ## TL;DR — what to download
 Keep the **Qwen-VL family** — it's SOTA-open for OCR-in-context *and* stays promptable (it
 classifies, not just transcribes). Prefer **Unsloth Dynamic (UD) GGUFs** — better accuracy per bit.
@@ -34,13 +41,15 @@ docsort sends only ~4000 chars of text + ONE rendered page, and asks for a 1-lin
 - `dpi` (page render): **120 → 150–200** for dense/handwritten scans = sharper OCR, a few more
   image tokens. Bump only if vision-tier accuracy is weak.
 - `deep_pages` / `deep_cap`: raise if books bury the topic past page 5.
-- `min_text`: lower (e.g. 40) to push more thin-text PDFs to the text tier instead of vision.
+- `min_text`: lower (e.g. 40) to push more thin-text PDFs to the model-free EMBED tier instead of
+  the model-based VISION tier — fewer files touch the model at all.
 
 ## How to benchmark (clean comparison)
-1. Build a **ground-truth set**: ~30–50 representative files you've hand-tagged correctly.
-2. For each candidate model: load in LM Studio, run `docsort "<set>" --copy` (dry-run-ish), then
-   compare the run journal/report labels to your ground truth → **accuracy %**, plus **tok/s** and
-   **wall time** from the PROGRESS stats.
+1. Build a **ground-truth set that's specifically scanned/handwritten PDFs** (VISION-tier
+   material) — a mixed set will mostly hit EMBED and never touch the model you're testing.
+2. For each candidate model: load in LM Studio, run `docsort "<set>" --copy --vision` (dry-run-ish),
+   then compare the run journal/report labels to your ground truth → **accuracy %**, plus **tok/s**
+   and **wall time** from the PROGRESS stats.
 3. Pick the best accuracy-at-acceptable-speed. The Phase-4 report/stats (coming) makes this a
    one-glance comparison.
 
