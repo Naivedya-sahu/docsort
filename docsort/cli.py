@@ -227,38 +227,32 @@ def decide(out):
     return st,su,ty,cf
 
 def classify(a,sysp,full,fn,rel):
+    """Non-vision files are classified by the EMBED tier alone — zero model calls.
+    VISION tier (scanned/handwritten pages with no extractable text) is the one
+    exception and still uses the model, since there's nothing reliable to embed."""
     ispdf=full.lower().endswith(".pdf")
     snip=doc_text(full)
-    if a.embed_threshold is not None and STREAM_CENTROIDS and SUBJECT_CENTROIDS:
-        from docsort.cascade import classify_by_embed
-        r=classify_by_embed(f"{fn} {rel} {snip}",STREAM_CENTROIDS,SUBJECT_CENTROIDS,a.embed_threshold)
-        if r is not None:
-            st,su,_,_=r
-            return st,su,"misc","high","embed"
-    u=lambda txt:f"Filename: {fn}\nFolder: {rel}\nText:\n{txt[:DEEP_CAP]}\n\nAnswer (STREAM SUBJECT TYPE CONF):"
-    if len(snip.strip())>=MIN_TEXT:
-        st,su,ty,cf=decide(llm(a,a.backend,sysp,u(snip))); src="text"
-        if su=="99UNS" and ispdf:
-            deep=pdf_text(full,DEEP_PAGES,DEEP_CAP)
-            if len(deep)>len(snip):
-                r=decide(llm(a,a.backend,sysp,u(deep)))
-                if r[1]!="99UNS": st,su,ty,cf,src=(*r,"text5"); snip=deep
-        if su=="99UNS" and a.frontier!="none":
-            r=decide(llm(a,a.frontier,sysp,u(snip)))
-            if r[1]!="99UNS": return (*r,"frontier:"+a.frontier)
-        return st,su,ty,cf,src
-    if a.vision and ispdf and (png:=page_png(full,0)):
+    has_text=len(snip.strip())>=MIN_TEXT
+    if not has_text and a.vision and ispdf and (png:=page_png(full,0)):
         un="(handwritten/scanned page) Answer (STREAM SUBJECT TYPE CONF):"
         st,su,ty,cf=decide(llm(a,a.backend,sysp,f"Filename: {fn}\nFolder: {rel}\n"+un,png)); src="vision"
         if su=="99UNS" and (p3:=page_png(full,2)):
             r=decide(llm(a,a.backend,sysp,f"Filename: {fn}\nFolder: {rel}\n(page 3) "+un,p3))
             if r[1]!="99UNS": return (*r,"vision3")
         return st,su,ty,cf,src
-    r=decide(llm(a,a.backend,sysp,u("")))
-    if r[1]=="99UNS" and a.frontier!="none":
-        rf=decide(llm(a,a.frontier,sysp,u("")))
-        if rf[1]!="99UNS": return (*rf,"frontier:"+a.frontier)
-    return (*r,"filename")
+    from docsort.cascade import classify_by_embed
+    r=classify_by_embed(f"{fn} {rel} {snip}",STREAM_CENTROIDS,SUBJECT_CENTROIDS,a.stream_threshold,a.subject_threshold)
+    if r is not None:
+        st,su,_,_=r
+        return st,su,"misc","high","embed"
+    if ispdf:                                       # try harder before giving up — still no model call
+        deep=pdf_text(full,DEEP_PAGES,DEEP_CAP)
+        if len(deep)>len(snip):
+            r=classify_by_embed(f"{fn} {rel} {deep}",STREAM_CENTROIDS,SUBJECT_CENTROIDS,a.stream_threshold,a.subject_threshold)
+            if r is not None:
+                st,su,_,_=r
+                return st,su,"misc","high","embed5"
+    return "CW","99UNS","misc","low","embed-unsure"
 
 def move_by_prefix(root,dest,apply):
     pat=re.compile(r'^\[([A-Z]+)-([0-9A-Z]+)\]\s+(.*)$'); n=0; rows=[]
@@ -454,12 +448,13 @@ def stats():
     for k,c in tot.most_common(25): print(f"  {k}: {c}")
 
 def setup(a):
+    """Also builds the EMBED-tier centroids unconditionally — non-vision files are
+    classified by EMBED alone (no model call), so the centroids are always needed,
+    not just when a threshold happens to be set."""
     global STREAMS,SUBJECTS,TYPES,STREAM_CENTROIDS,SUBJECT_CENTROIDS
     s,su,ty=load_tags(a.tags); STREAMS=set(s); SUBJECTS=set(su); TYPES=set(ty)
-    STREAM_CENTROIDS,SUBJECT_CENTROIDS={},{}
-    if getattr(a,"embed_threshold",None) is not None:
-        from docsort.cascade import build_centroids
-        STREAM_CENTROIDS=build_centroids(s); SUBJECT_CENTROIDS=build_centroids(su)
+    from docsort.cascade import build_centroids
+    STREAM_CENTROIDS=build_centroids(s); SUBJECT_CENTROIDS=build_centroids(su)
     return build_system(a.prompt,s,su,ty)
 
 def add_args(ap):
@@ -497,8 +492,12 @@ def add_args(ap):
                     help="build the index (if needed) and print thin-chain flatten proposals, then exit")
     ap.add_argument("--apply-reorg",dest="apply_reorg",action="store_true",
                     help="apply the reorg-suggester's thin-chain flatten proposals")
-    ap.add_argument("--embed-threshold",dest="embed_threshold",type=float,default=None,
-                    help="enable the EMBED cascade tier at this cosine-similarity threshold (0.0-1.0); unset = disabled")
+    ap.add_argument("--stream-threshold",dest="stream_threshold",type=float,default=None,
+                    help="STREAM-axis confidence cutoff (0.0-1.0) for the model-free EMBED classifier "
+                         "used on all non-vision files (default from config, currently 0.3)")
+    ap.add_argument("--subject-threshold",dest="subject_threshold",type=float,default=None,
+                    help="SUBJECT-axis confidence cutoff (0.0-1.0) for the model-free EMBED classifier "
+                         "used on all non-vision files (default from config, currently 0.45)")
     ap.add_argument("--apply-journal",dest="apply_journal",action="store_true",
                     help="apply a prior dry-run's audited decisions from the journal (rename/move only, no model calls)")
     ap.add_argument("--stats",action="store_true",help="print lifetime stats from the global index, then exit")
