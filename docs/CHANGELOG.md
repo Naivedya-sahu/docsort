@@ -2,6 +2,35 @@
 
 All notable changes. Newest on top.
 
+## [0.13.0] — 2026-07-01
+### Added
+- **Ground-truth index** (`docsort/index.py`) — SQLite snapshot of drive state (path/size/hash/mtime/
+  embedding), cross-root not per-folder. `--scan` builds/refreshes it.
+- **Archive-aware scanning** — recurses into `.zip` (including nested zips), depth-capped (default 6) and
+  size-budget-capped against zip-bomb-style pathological nesting; overflow is reported, not silently
+  dropped.
+- **Clean phase** (`docsort/dedup.py`, `docsort/vendor.py`, `docsort/clean.py`) — three dedup layers
+  (exact-hash, whole-duplicated-subtree signature, embedding-based near-duplicate clustering) plus a
+  vendor-dump heuristic detector (GitHub `-master`/`-main` archive naming). `--clean-report` (dry-run) and
+  `--apply-clean QUARANTINE_DIR` (quarantine-move, own JSONL audit log) give it a CLI surface.
+- **EMBED cascade tier** (`docsort/embed.py`, `docsort/cascade.py`) — a stdlib-only (no ML dependency)
+  hashing-trick embedding + zero-shot centroid classifier, seeded from `TAGS.md`'s own STREAM/SUBJECT
+  descriptions. Inserted before the TEXT tier in `classify()`, **opt-in and default-off**
+  (`--embed-threshold`, unset = disabled) — resolves confident files with zero LLM calls when enabled.
+- **Reorg-suggester** (`docsort/reorg.py`) — detects thin single-child folder chains (the pattern found
+  reviewing a real messy drive export) and proposes flattening them. `--reorg-report` (dry-run) and
+  `--apply-reorg` (executes, own JSONL log).
+- Full design doc: `docs/superpowers/specs/2026-07-01-v0.13-drive-organizer-design.md`.
+
+### Deferred (documented, not shipped this release)
+- Hybrid multi-tag output for VISION/FRONTIER tiers — needs a system-prompt wording change validated
+  against a live model; no LM Studio access in the environment this was built in to verify it safely.
+- GUI surfacing (Run-tab EMBED hit-rate counter, Clean/Reorg report views, Tags-tab tag-model split) —
+  needs a human visual smoke-test per existing project convention; the GUI's nav structure also changed
+  since the spec's §3.9 was written (5 tabs → 3 in v0.12.3), so it needs re-verification first.
+- Everything HTTP API integration for fast enumeration — `os.walk` fallback covers `--scan` correctly
+  today; the perf-only integration itself is deferred.
+
 ## [0.12.3] — 2026-07-01
 ### Changed
 - **GUI nav rail: 5 tabs → 3** (Run / Tags / Stats). Folders and Reports are no longer standalone

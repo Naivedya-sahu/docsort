@@ -16,6 +16,9 @@ Full historical state lives in [`HANDOFF.md`](HANDOFF.md); per-release detail in
 | 0.11.0 | **GUI rebuilt on Flet** — nav rail + Run view (progress/time/ETA/counters/feed/log) + Tags/Folders/Reports/Stats. New `runcore.py` + `tagsio.py`. Engine unchanged. |
 | 0.11.1 | GUI hotfixes — FilePicker as a Flet service (picker timeout), dropdown labels, threaded model refresh; exe bundling fix (`flet pack` + `--add-data`/`--paths`). |
 | 0.12.0 | **`--apply-journal` (fast apply)** — replay a dry-run's journal decisions as renames, no model calls; + GUI "Apply audited" button. |
+| 0.12.1 | GUI hotfixes — no background console window, Run/Apply-audited work in the packaged exe, custom app icon. |
+| 0.12.3 | GUI nav rail consolidated 5 tabs → 3 (Run/Tags/Stats); run-option toggles moved to Tags; `99UNS` defaults flipped (skip-unknown on, misc-quarantine off). |
+| **0.13.0** | **Drive-organizer backend** — ground-truth index (`index.py`, archive-aware zip scan, depth/budget-capped), Clean phase (3-layer dedup + vendor-dump detector, `--clean-report`/`--apply-clean`), EMBED cascade tier (opt-in, `--embed-threshold`), Reorg-suggester (thin-chain flattening, `--reorg-report`/`--apply-reorg`). Full design: `docs/superpowers/specs/2026-07-01-v0.13-drive-organizer-design.md`. |
 
 ## Next — low priority
 
@@ -27,6 +30,13 @@ Full historical state lives in [`HANDOFF.md`](HANDOFF.md); per-release detail in
 
 ## Planned — later versions
 
+- **v0.13.x follow-ups (deferred from 0.13.0, see CHANGELOG):**
+  - Hybrid multi-tag output for VISION/FRONTIER tiers — needs a system-prompt wording change validated
+    against a live model before shipping.
+  - GUI surfacing for the drive-organizer features (Run-tab EMBED hit-rate counter, Clean/Reorg report
+    views, Tags-tab tag-model split) — needs re-verification against the current 3-tab nav (changed in
+    v0.12.3, after the original §3.9 design was written) plus a human visual smoke-test.
+  - Everything HTTP API integration for fast enumeration (perf-only; `os.walk` fallback already works).
 - **Background processing + system tray** — run minimized / keep working from the tray so a long batch
   doesn't tie up a window. (Out of scope for the v0.11.0 visual overhaul.)
 - **Single unified Windows package** — one Windows release artifact (installer/package) instead of the
