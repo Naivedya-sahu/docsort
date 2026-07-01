@@ -58,14 +58,67 @@ Console commands: **`docsort`** (CLI) and **`docsort-gui`** (GUI).
 **Dev loop (this machine):**
 - Editable interpreter: `.venv\Scripts\python.exe` (has pymupdf, flet 0.85.3, pytest, pyinstaller;
   does NOT have sentence-transformers/torch — the `recon` extra was never installed here, see §9).
-- Tests: `.venv\Scripts\python.exe -m pytest -q` — **73 tests**, all pure-logic/hermetic. No
+- Tests: `.venv\Scripts\python.exe -m pytest -q` — **74 tests**, all pure-logic/hermetic. No
   model/network needed anywhere, including recon's tests (they exercise the real stdlib-fallback
   path, since sentence-transformers genuinely isn't installed in this environment).
 - **Build exes locally:** `build-exe.bat` (repo root) — GUI via `flet pack`, CLI via PyInstaller, version
   read from `docsort.__version__`. Outputs `dist\docsort-gui.exe` (~85 MB) + `dist\docsort.exe` (~112 MB).
 
-**Releases are automated:** push a `v*` tag → `release.yml` builds both exes on a Windows runner
-and publishes the release. `ci.yml` runs compile + import + `--help` + pytest on 3.9/3.11/3.12.
+### Release checklist — every time a commit (or set of commits) should ship
+
+Not every commit ships. Work accumulates on `main` until *someone decides* it's release-worthy — that
+decision is explicit, not automatic. When it is, do this, in order:
+
+1. **Decide the bump** (semver):
+   - **patch** — pure bug fix, no new flag/behavior (e.g. the model-preflight fix, 2026-07-01).
+   - **minor** — new flag/feature/capability (e.g. `--recon-report`, the EMBED tier itself).
+   - **major** — none shipped yet; would mean a breaking change to existing flags/output format.
+   - "Hotfix" is not a separate version tier — it's just an urgent **patch**, same process below.
+
+2. **Bump the version in BOTH places — they do NOT sync automatically.** This exact gap caused a
+   real bug once already (pyproject.toml sat on `0.12.3` for a full minor release after
+   `__init__.py` moved to `0.13.0`, until caught and fixed by hand):
+   - `docsort/__init__.py` → `__version__ = "X.Y.Z"` (what `--version` and the GUI title bar show)
+   - `pyproject.toml` → `[project] version = "X.Y.Z"` (pip package metadata)
+
+3. **Add a `docs/CHANGELOG.md` entry** — `## [X.Y.Z] — YYYY-MM-DD`, `### Added`/`### Fixed`/
+   `### Changed` sections as needed, one line per real change. Match the tone/format of existing
+   entries (skim the last 2-3 before writing a new one).
+
+4. **Build + smoke-test locally, BEFORE tagging:**
+   ```
+   build-exe.bat
+   ```
+   Then **actually run** `dist\docsort-gui.exe` — check the title bar shows the right version, run a
+   real classify pass on a test folder, confirm no console window lingers. **This step is mandatory,
+   not optional** — the GUI is headless-unverifiable by an agent (see §9); a human running the real
+   built exe is the only gate that catches GUI regressions before they ship. Skipping this step is
+   how the run.bat console-lingering issue and past GUI regressions reached a release undetected.
+
+5. **Commit the version bump + changelog** directly to `main` — no feature branch needed for a
+   docs/version-only commit (matches the v0.10.2 precedent).
+
+6. **Tag and push:**
+   ```
+   git tag -a vX.Y.Z -m "vX.Y.Z — <one-line summary>"
+   git push origin vX.Y.Z
+   ```
+   This alone triggers `release.yml` — builds both exes fresh on a Windows GitHub Actions runner
+   (independent of your local build in step 4) and publishes the GitHub release with both exe
+   assets attached. Takes ~3 minutes.
+
+7. **Verify the release actually succeeded — don't assume a green push means a green release:**
+   ```
+   gh run list --workflow=release.yml --limit 1
+   gh run watch <run-id> --exit-status
+   gh release view vX.Y.Z
+   ```
+
+8. **Update `docs/ROADMAP.md`'s Shipped table** with the new version row — one line, same gist as
+   the CHANGELOG entry.
+
+`ci.yml` runs on every push regardless (compile + import + `--help` + pytest on 3.9/3.11/3.12) —
+that's continuous, not part of this release-specific checklist.
 
 ---
 
@@ -92,7 +145,7 @@ docsort/
   recon.py           # (unreleased) name-only, whole-tree, zero-model triage — NameEmbedder + recon_scan()
   data/              # bundled templates (TAGS.md, system_prompt.md, config.example.json)
 tests/  — test_core.py test_runcore.py test_index.py test_dedup.py test_vendor.py test_clean.py
-          test_reorg.py test_embed.py test_cascade.py test_tree.py test_recon.py  (73 tests total)
+          test_reorg.py test_embed.py test_cascade.py test_tree.py test_recon.py  (74 tests total)
 run_gui.py, run_cli.py             # PyInstaller/flet-pack entry points (repo root)
 build-exe.bat                      # local exe build
 .github/workflows/ci.yml, release.yml
@@ -193,10 +246,10 @@ tab). No v0.13.0 feature is reachable from the GUI.
 | 0.12.1 | GUI hotfixes — no console window, Run/Apply-audited work in the packaged exe. |
 | 0.12.3 | GUI nav rail 5→3 tabs (Folders/Reports folded into Stats); `99UNS` defaults flipped. |
 | **0.13.0** | **Drive-organizer backend** — ground-truth index (archive-aware), Clean (3-layer dedup + vendor-dump), EMBED cascade tier (replaces TEXT/ESCALATE/FRONTIER for non-vision files), Reorg (thin-chain flatten). Released, tagged, exes published. |
-| *(unreleased, on `main`)* | Architecture fixes: `DirectoryTree` (2 real bugs fixed), `index_session()` consolidation (1 real bug fixed — index self-scanning its own db). New **Recon** feature (`recon.py`, `--recon-report`, optional GPU embedder via `[recon]` extra). |
+| *(unreleased, on `main`)* | Architecture fixes: `DirectoryTree` (2 real bugs fixed), `index_session()` consolidation (1 real bug fixed — index self-scanning its own db). New **Recon** feature (`recon.py`, `--recon-report`, optional GPU embedder via `[recon]` extra). `--version` + GUI title version display added; `pyproject.toml`'s version (was stuck on `0.12.3`) synced to `__init__.py`'s. `run.bat`'s GUI branch fixed (pythonw + start, no longer console-attached for the whole session). **Real bug found by the user testing the built exe:** `main()`'s pre-flight model-server check hard-aborted every run when LM Studio wasn't reachable, even though EMBED-tier classification needs no model — contradicted the entire point of the EMBED-only redesign. Fixed: scoped to `vision`-only, degrades gracefully instead of aborting. |
 
 Git: `main` pushed to origin, tree clean, well past the v0.13.0 tag. **Not yet tagged as v0.14.0** —
-no release instruction given for the post-v0.13.0 work yet.
+no release instruction given for the post-v0.13.0 work yet. See §2's Release checklist when ready.
 
 ---
 
@@ -289,8 +342,11 @@ Taxonomy Generator; (3) effectively Windows-only; (4) unsigned exe (SmartScreen)
   flags/features → minor bump, pure fixes → patch. Docs-only changes commit directly to `main`, no
   feature branch (matches the v0.10.2 precedent).
 - **Real bugs found during refactors get fixed and documented as findings, not silently absorbed** —
-  3 were found and fixed this cycle (index self-scanning its own db; two DirectoryTree-migration
-  scoping bugs) via test-first discipline, not by inspection alone.
+  4 were found and fixed this cycle: index self-scanning its own db; two DirectoryTree-migration
+  scoping bugs (all via test-first discipline, not inspection alone); and one found by the user
+  testing the actual built exe (`main()`'s model-preflight check aborting every EMBED-only run) —
+  a reminder that automated tests don't replace a human running the real thing (see the Release
+  checklist's mandatory smoke-test step, §2).
 
 ---
 
