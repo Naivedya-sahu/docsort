@@ -5,6 +5,7 @@ import sys
 import zipfile
 from docsort.index import (
     open_index, SCHEMA, hash_file, scan_directory, scan_zip, MAX_ARCHIVE_DEPTH, scan_root,
+    list_directories,
 )
 
 
@@ -137,3 +138,19 @@ def test_cli_scan_flag_reports_count(tmp_path):
     )
     assert result.returncode == 0
     assert "indexed" in result.stdout.lower()
+
+
+def test_list_directories_derives_from_file_paths(tmp_path):
+    data_root = tmp_path / "data"
+    (data_root / "sub").mkdir(parents=True)
+    (data_root / "a.txt").write_bytes(b"1")
+    (data_root / "sub" / "b.txt").write_bytes(b"2")
+
+    db_path = tmp_path / "index.db"
+    conn = open_index(str(db_path))
+    scan_directory(conn, str(data_root))
+
+    dirs = list_directories(conn)
+    assert str(data_root) in dirs
+    assert str(data_root / "sub") in dirs
+    conn.close()

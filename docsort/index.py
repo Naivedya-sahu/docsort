@@ -98,6 +98,19 @@ def scan_zip(conn, zip_source, virtual_prefix, depth, budget):
     return budget
 
 
+def list_directories(conn):
+    dirs = set()
+    for (path,) in conn.execute("SELECT path FROM files"):
+        d = os.path.dirname(path)
+        while d and d not in dirs:
+            dirs.add(d)
+            parent = os.path.dirname(d)
+            if parent == d:
+                break
+            d = parent
+    return dirs
+
+
 MAX_ARCHIVE_EXTRACT_BYTES = 500 * 1024 * 1024  # 500MB per top-level archive
 
 
