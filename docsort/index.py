@@ -114,6 +114,24 @@ def get_embedding(conn, path):
     return tuple(float(x) for x in row[0].split(","))
 
 
+def embed_index(conn):
+    """Fill the embedding column for every file that doesn't have one yet.
+    Uses filename + parent folder name — available for every file with no
+    text-extraction dependency. Returns the number of files newly embedded."""
+    from docsort.embed import embed_text
+    rows = conn.execute(
+        "SELECT path FROM files WHERE embedding IS NULL"
+    ).fetchall()
+    count = 0
+    for (path,) in rows:
+        basename = os.path.basename(path)
+        parent = os.path.basename(os.path.dirname(path))
+        vec = embed_text(f"{parent} {basename}")
+        set_embedding(conn, path, vec)
+        count += 1
+    return count
+
+
 def list_directories(conn):
     dirs = set()
     for (path,) in conn.execute("SELECT path FROM files"):

@@ -5,7 +5,7 @@ import sys
 import zipfile
 from docsort.index import (
     open_index, SCHEMA, hash_file, scan_directory, scan_zip, MAX_ARCHIVE_DEPTH, scan_root,
-    list_directories, set_embedding, get_embedding,
+    list_directories, set_embedding, get_embedding, embed_index,
 )
 
 
@@ -170,4 +170,37 @@ def test_set_and_get_embedding_roundtrip(tmp_path):
     set_embedding(conn, path, vec)
     result = get_embedding(conn, path)
     assert result == vec
+    conn.close()
+
+
+def test_embed_index_fills_missing_embeddings(tmp_path):
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    (data_root / "a.txt").write_bytes(b"x")
+    (data_root / "b.txt").write_bytes(b"y")
+
+    db_path = tmp_path / "index.db"
+    conn = open_index(str(db_path))
+    scan_directory(conn, str(data_root))
+
+    count = embed_index(conn)
+    assert count == 2
+    vec = get_embedding(conn, str(data_root / "a.txt"))
+    assert vec is not None
+    assert len(vec) == 128
+    conn.close()
+
+
+def test_embed_index_skips_already_embedded(tmp_path):
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    (data_root / "a.txt").write_bytes(b"x")
+
+    db_path = tmp_path / "index.db"
+    conn = open_index(str(db_path))
+    scan_directory(conn, str(data_root))
+    embed_index(conn)
+
+    second_pass_count = embed_index(conn)
+    assert second_pass_count == 0
     conn.close()
