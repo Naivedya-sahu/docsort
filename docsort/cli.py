@@ -493,6 +493,10 @@ def add_args(ap):
                     help="build the index (if needed) and print a dedup/vendor-dump report, then exit")
     ap.add_argument("--apply-clean",dest="apply_clean_dir",default=None,metavar="QUARANTINE_DIR",
                     help="apply Clean-phase findings: move confirmed items into QUARANTINE_DIR")
+    ap.add_argument("--reorg-report",dest="reorg_report",action="store_true",
+                    help="build the index (if needed) and print thin-chain flatten proposals, then exit")
+    ap.add_argument("--apply-reorg",dest="apply_reorg",action="store_true",
+                    help="apply the reorg-suggester's thin-chain flatten proposals")
     ap.add_argument("--embed-threshold",dest="embed_threshold",type=float,default=None,
                     help="enable the EMBED cascade tier at this cosine-similarity threshold (0.0-1.0); unset = disabled")
     ap.add_argument("--apply-journal",dest="apply_journal",action="store_true",
@@ -562,6 +566,25 @@ def main(argv=None):
         moves=apply_clean(conn,clean_rpt,a.apply_clean_dir,dry_run=False,log_path=log_path)
         conn.close()
         print(f"Moved {len(moves)} items to {a.apply_clean_dir} (log: {log_path})")
+        return
+    if a.reorg_report or a.apply_reorg:
+        from docsort.index import open_index, scan_root
+        from docsort.reorg import find_thin_chains, propose_flatten, apply_moves
+        db_path=os.path.join(a.root,"_docsort_index.db")
+        conn=open_index(db_path)
+        scan_root(conn,a.root)
+        chains=find_thin_chains(conn,a.root)
+        moves=propose_flatten(conn,chains)
+        if a.reorg_report:
+            conn.close()
+            print(f"Thin chains found: {len(chains)}")
+            for c in chains: print(f"  {c['start']} -> {c['end']} (length {c['length']})")
+            print(f"Proposed moves: {len(moves)}")
+            return
+        log_path=os.path.join(a.root,"_docsort_reorg_log.jsonl")
+        applied=apply_moves(moves,dry_run=False,log_path=log_path)
+        conn.close()
+        print(f"Flattened {len(applied)} files across {len(chains)} thin chains (log: {log_path})")
         return
     if a.apply_journal:                                      # offline: replay audited decisions, no model
         apply_journal(a.root, misc=bool(a.misc), skip_unknown=bool(a.skip_unknown)); return
