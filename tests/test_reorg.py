@@ -26,6 +26,26 @@ def test_find_thin_chains_detects_single_child_nesting(tmp_path):
     conn.close()
 
 
+def test_find_thin_chains_stops_at_folders_with_own_loose_files(tmp_path):
+    """A folder with 1 subdir AND its own loose files is not a pass-through wrapper.
+    The chain must stop there (as the end), not walk past it into the subdir —
+    otherwise propose_flatten only moves the subdir's file and silently leaves the
+    wrapper's own loose file behind, even though the chain claimed to resolve it."""
+    root = tmp_path / "data"
+    (root / "Wrapper" / "Inner").mkdir(parents=True)
+    (root / "Wrapper" / "loose.txt").write_bytes(b"real content, not just a wrapper")
+    (root / "Wrapper" / "Inner" / "deep.txt").write_bytes(b"deep")
+
+    db_path = tmp_path / "index.db"
+    conn = open_index(str(db_path))
+    scan_directory(conn, str(root))
+
+    chains = find_thin_chains(conn, str(root), min_length=2)
+    assert len(chains) == 1
+    assert chains[0]["end"] == str(root / "Wrapper")   # must stop here, not descend into Inner
+    conn.close()
+
+
 def test_find_thin_chains_respects_min_length(tmp_path):
     root = tmp_path / "data"
     # only 2 directories in the chain (data -> A) — below min_length=3

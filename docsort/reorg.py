@@ -3,23 +3,19 @@ import os
 import shutil
 import time
 
-from docsort.index import list_directories
-
-
-def _children_of(all_dirs, d):
-    return [x for x in all_dirs if os.path.dirname(x) == d]
+from docsort.tree import DirectoryTree
 
 
 def find_thin_chains(conn, root, min_length=3):
-    """Detect runs of directories where each has exactly one subdirectory child.
-    Scoped to `root` (and its descendants) — list_directories() also returns filesystem
-    ancestors above the scanned root, which must not be treated as reorg candidates.
+    """Detect runs of directories where each has exactly one child total — a
+    subdirectory, with no loose files of its own. A folder with a subdir AND its
+    own files is not a pure pass-through wrapper even though it has only one
+    subdirectory; the chain must stop there, not walk past it (see DirectoryTree).
     Returns [{"start": path, "end": path, "length": N}, ...] for chains >= min_length."""
-    root_prefix = root + os.sep
-    all_dirs = {d for d in list_directories(conn) if d == root or d.startswith(root_prefix)}
-    child_count = {d: len(_children_of(all_dirs, d)) for d in all_dirs}
-
-    thin = {d for d in all_dirs if child_count[d] == 1}
+    tree = DirectoryTree.from_index(conn, root)
+    all_dirs = tree.all_dirs()
+    thin = {d for d in all_dirs
+            if tree.child_count(d) == 1 and len(tree.child_dirs(d)) == 1}
     chain_starts = [d for d in thin if os.path.dirname(d) not in thin]
 
     chains = []
@@ -27,9 +23,7 @@ def find_thin_chains(conn, root, min_length=3):
         length = 1
         cur = start
         while True:
-            kids = _children_of(all_dirs, cur)
-            if len(kids) != 1:
-                break
+            kids = tree.child_dirs(cur)
             nxt = kids[0]
             if nxt in thin:
                 length += 1
