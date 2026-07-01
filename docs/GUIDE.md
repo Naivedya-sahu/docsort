@@ -1,24 +1,53 @@
 # docsort — Guide
 
-## 1. What the LLM receives (per file)
-Two messages:
+## 1. What the model receives (VISION tier only)
+
+As of v0.13.0, **only the VISION tier calls a model at all.** Non-vision files (the vast majority —
+anything with extractable text) are classified entirely by the model-free EMBED tier: zero LLM calls,
+zero processing-time cost. See §2.
+
+For the one tier that still calls a model:
 - **SYSTEM** = the `<SYSTEM>` block of `system_prompt.md` with `{{STREAMS}}/{{SUBJECTS}}/{{TYPES}}`
   filled from `TAGS.md` (single source). Same every call.
-- **USER** = per file:
-  - *text tier:* `Filename / Folder / Text(<=4000 chars) / Answer (STREAM SUBJECT TYPE CONF):`
-  - *vision tier:* same + the page rendered to PNG.
-  - *filename tier:* same with empty text.
+- **USER** = `Filename / Folder / (handwritten/scanned page) Answer (STREAM SUBJECT TYPE CONF):` +
+  the page rendered to PNG.
 Settings: `temperature=0`, `max_tokens=24`. Reply is one line, e.g. `CW 12EMAG notes high`
 (or with a discovery: `CW 99UNS notes high PROPOSE:THERMO`).
 
 ## 2. Classification tiers (in order)
-1. **TEXT** — first 2 pages; if ≥80 chars → text model.
-2. **ESCALATE** — if SUBJECT is `99UNS` on a PDF, re-read **up to 5 pages** (past cover/preface/TOC)
-   and retry → `source=text5`.
-3. **VISION** — no extractable text → render page 1 → vision model; still `99UNS`? page 3 → `vision3`.
-4. **FRONTIER** *(optional)* — if still `99UNS` and `--frontier` set, ask a frontier model → `source=frontier:<be>`.
-5. **FILENAME** — last resort.
-Trust order: `text > text5 > vision > vision3 > frontier > filename` (the `source` column).
+1. **EMBED** — the default and only tier for non-vision files. A stdlib hashing-trick embedding
+   (no ML dependency) of filename+folder+extracted text is matched against zero-shot centroids built
+   from `TAGS.md`'s own STREAM/SUBJECT descriptions. Two independent confidence cutoffs
+   (`--stream-threshold`, `--subject-threshold` — see §5) — clears both → tagged, `source=embed`. A PDF
+   whose first pass misses gets one more try against a deeper 5-page extract (`source=embed5`, still no
+   model call). Below cutoff on either axis → `stream=CW subject=99UNS source=embed-unsure`, left for
+   `--review`/manual promotion, same as any other unsure file — **never escalated to a model.**
+2. **VISION** *(the one exception)* — only when there's no extractable text at all (scanned/handwritten
+   PDF) and `--vision` is set: render page 1 → vision model; still `99UNS`? page 3 → `vision3`. This is
+   the only path with a real processing-time cost, since there's nothing reliable to embed.
+Trust order: `embed > embed5 > vision > vision3` (the `source` column). `TEXT`/`ESCALATE`/`FRONTIER`
+(pre-v0.13.0 model-calling tiers) no longer exist on the non-vision path — see CHANGELOG v0.13.0.
+
+## 2.5 Drive-organizer features (v0.13.0+)
+
+Beyond per-file tagging, docsort can also clean up and triage a whole messy drive. All of these are
+their own CLI passes — dry-run first, journal-backed apply, same safety pattern as tagging:
+
+- **Scan** (`--scan`) — builds a ground-truth SQLite index (`_docsort_index.db`) of the whole tree,
+  including recursing into `.zip` archives (nested zips, depth/size-capped).
+- **Clean** (`--clean-report` / `--apply-clean`) — three dedup layers (exact-hash, whole-duplicated-
+  folder-subtree, embedding-based near-duplicate) plus a vendor-dump detector (flags
+  `repo-master`/`repo-main`-style GitHub download folders). Confirmed items move to a quarantine
+  folder you specify, never deleted directly.
+- **Reorg** (`--reorg-report` / `--apply-reorg`) — detects thin single-child folder chains (nesting
+  that adds depth with no organizational value) and proposes flattening them.
+- **Recon** (`--recon-report`) — the fastest, lightest pass: no index, no model, **no file content read
+  at all**. Walks every file and folder *name* in the tree and suggests a high-level STREAM/SUBJECT from
+  the name alone, for a quick structural overview before running anything else. Optional
+  `pip install "docsort[recon]"` extra adds a real GPU-capable embedding model (auto CUDA/CPU); without
+  it, recon still works via the same built-in embedder Clean's near-duplicate layer uses.
+
+Full design: `docs/superpowers/specs/2026-07-01-v0.13-drive-organizer-design.md`.
 
 ## 3. The tag scheme — known + discovered
 - **Prefix `[STREAM-SUBJECT]`** is the only thing added to the name. STREAM peels GATE/PROJ/RES/REC
@@ -72,6 +101,13 @@ dry-run results without re-classifying).
 | `--stats` | print lifetime totals from `%APPDATA%/docsort/index.jsonl`, then exit |
 | `--list-models` | list models loaded in LM Studio (at `--host`), then exit |
 | `--edit-tags` | open your `TAGS.md` in an editor, then exit |
+| `--stream-threshold` / `--subject-threshold` | EMBED-tier confidence cutoffs (0.0-1.0), one per axis (config defaults: 0.3 / 0.45 — see §7 for why they're separate) |
+| `--scan` | build/refresh the ground-truth index (`_docsort_index.db`) for root, then exit — no model, no classification |
+| `--clean-report` | index (if needed) + print a dedup/vendor-dump report (exact-hash, duplicate-subtree, near-duplicate, vendor-dump groups), then exit |
+| `--apply-clean DIR` | apply the Clean report's findings — quarantine-move confirmed items into `DIR`, journal-backed (`_docsort_clean_log.jsonl`) |
+| `--reorg-report` | index (if needed) + print thin single-child-folder-chain flatten proposals, then exit |
+| `--apply-reorg` | apply the reorg-suggester's flatten proposals, journal-backed (`_docsort_reorg_log.jsonl`) |
+| `--recon-report` | **no index, no model, no content read at all** — walks every file/folder *name* in root and suggests a high-level STREAM/SUBJECT per entry, before Scan/Clean/Classify touch anything (see §2.5) |
 
 **Robustness:** runs are crash-safe — a journal (`_docsort_state.jsonl`) is written per file. Ctrl-C
 pauses gracefully (`--resume` continues). If LM Studio drops mid-run, docsort stops with a resume
@@ -95,6 +131,14 @@ hint instead of mislabeling the rest `99UNS`. Each run also emits `PROGRESS i/N 
 - **Models auto-resolve for any user:** if the model id in config isn't loaded in LM Studio, the app
   picks whatever VL model *is* loaded (see the `[model] ->` / `[vision] ->` line). You rarely need to
   set the exact id.
+- **EMBED thresholds are two separate knobs, not one, deliberately.** Real testing against the full
+  `TAGS.md` vocabulary found STREAM and SUBJECT scores don't move together — e.g. BJT-heavy text scores
+  ~0.7 on SUBJECT but only ~0.25 on STREAM, since STREAM's descriptions are short/generic and SUBJECT's
+  are technical/specific. A shared threshold systematically rejected one axis. Config defaults
+  (`stream_embed_threshold: 0.3`, `subject_embed_threshold: 0.45`) are a starting point — retune against
+  your own corpus via `--report`/`TAG-REVIEW.md`, the same workflow already used to promote `~LABEL`
+  proposals. More files landing in `99UNS` than expected usually means one threshold is too strict for
+  your material, not a bug.
 
 ## 8. Reviewing & reversibility
 - `--review` → TAG-REVIEW.md: distribution, proposed (`~`) tags, low-confidence list.
