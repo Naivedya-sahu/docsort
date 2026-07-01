@@ -611,13 +611,18 @@ def main(argv=None):
     if a.frontier=="claude" and not shutil.which("claude"):
         print("[frontier] 'claude' CLI not on PATH — install Claude Code and run `claude` once to log in. "
               "Continuing without the frontier fallback."); a.frontier="none"
-    if a.backend=="local":                       # adapt to whatever model is loaded
-        m,up=resolve_model(a.api,a.model,prefer_vision=True)   # text tier too: grab any loaded VL model
-        if not up: ap.error(f"model server unreachable at {a.api} — start LM Studio or fix --host (see TROUBLESHOOTING.md)")
-        if m!=a.model: print(f"[model] '{a.model}' not loaded -> '{m}'"); a.model=m
-        if a.vision:
-            vm,up=resolve_model(a.api,a.vision_model,prefer_vision=True)
-            if up and vm!=a.vision_model: print(f"[vision] '{a.vision_model}' not loaded -> '{vm}'"); a.vision_model=vm
+    if a.backend=="local" and a.vision:           # only the VISION tier needs a model now --
+                                                   # EMBED (every non-vision file) never calls one
+        m,up=resolve_model(a.api,a.model,prefer_vision=True)
+        if not up:
+            print(f"[model] server unreachable at {a.api} — continuing EMBED-only; VISION-tier "
+                  f"files (scanned/handwritten, no extractable text) will be marked 99UNS this run "
+                  f"instead of read. Start LM Studio and re-run to include them (see TROUBLESHOOTING.md).")
+            a.vision=False
+        else:
+            if m!=a.model: print(f"[model] '{a.model}' not loaded -> '{m}'"); a.model=m
+            vm,up2=resolve_model(a.api,a.vision_model,prefer_vision=True)
+            if up2 and vm!=a.vision_model: print(f"[vision] '{a.vision_model}' not loaded -> '{vm}'"); a.vision_model=vm
     sysp=setup(a); rows=[]; n=0
     include=(cfg.get("include") or [])+(a.include or [])   # config + CLI
     exclude=(cfg.get("exclude") or [])+(a.exclude or [])

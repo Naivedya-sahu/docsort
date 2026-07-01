@@ -45,6 +45,26 @@ def test_tag_editor_roundtrip(tmp_path):
     assert "93TEST" in su
 
 
+def test_run_continues_without_model_server_when_vision_not_needed(tmp_path, monkeypatch):
+    """Real bug: main()'s pre-flight model check called ap.error() (hard sys.exit) whenever
+    the model server was unreachable -- unconditionally, even though EMBED-tier
+    classification (the default for every non-vision file) needs no model at all. This
+    aborted the entire run with zero files processed if LM Studio wasn't running,
+    contradicting the whole point of the EMBED-only design. vision defaults ON from
+    config, so this is the exact default scenario, not an edge case."""
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    d = tmp_path / "run"; d.mkdir()
+    (d / "known.pdf").write_text("x", encoding="utf-8")
+
+    def fake_classify(a, sysp, full, fn, rel):
+        return ("CW", "08DIG", "notes", "high", "embed")
+    monkeypatch.setattr(cli, "classify", fake_classify)
+    monkeypatch.setattr(cli, "resolve_model", lambda *a, **k: ("m", False))  # server unreachable
+
+    cli.main([str(d), "--apply"])   # no SystemExit -- run must complete via EMBED alone
+    assert (d / "[CW-08DIG] known.pdf").exists()
+
+
 def test_skip_unknown(tmp_path, monkeypatch):
     """--skip-unknown leaves 99UNS files untouched; known files still rename."""
     monkeypatch.setenv("APPDATA", str(tmp_path))                 # isolate journal/index
