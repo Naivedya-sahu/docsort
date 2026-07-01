@@ -1,5 +1,5 @@
 """Pure-logic tests for docsort — no model, no network."""
-import os, json
+import argparse, os, json
 import pytest
 from docsort import cli, config
 
@@ -112,3 +112,68 @@ def test_apply_journal(tmp_path, monkeypatch):
     assert (d / "b.pdf").exists()                         # stale (mtime) -> untouched
     assert not (d / "[CW-10CTRL] b.pdf").exists()
     assert (d / "misc" / "[CW-99UNS] c.pdf").exists()     # 99UNS swept to misc (misc=True)
+
+
+def test_classify_non_vision_uses_embed_only_no_model_call(tmp_path, monkeypatch):
+    """Non-vision files: EMBED tier alone decides, zero model calls."""
+    from docsort.cascade import build_centroids
+    monkeypatch.setattr(cli, "STREAM_CENTROIDS",
+                         build_centroids({"CW": "CW coursework degree material notes assignments lab"}))
+    monkeypatch.setattr(cli, "SUBJECT_CENTROIDS",
+                         build_centroids({"04BJT": "04BJT BJT bipolar biasing CE CB CC h-params transistor"}))
+
+    def boom(*args, **kwargs):
+        raise AssertionError("llm() must not be called for non-vision files")
+    monkeypatch.setattr(cli, "llm", boom)
+
+    f = tmp_path / "bjt_notes.txt"
+    f.write_text("BJT bipolar transistor biasing CE CB CC lab assignment notes " * 3, encoding="utf-8")
+    a = argparse.Namespace(vision=False, stream_threshold=0.05, subject_threshold=0.05, backend="local", frontier="none")
+
+    st, su, ty, cf, src = cli.classify(a, "sysprompt", str(f), "bjt_notes.txt", "")
+    assert su == "04BJT"
+    assert src == "embed"
+
+
+def test_classify_non_vision_low_confidence_marks_99uns_no_model_call(tmp_path, monkeypatch):
+    """Below the EMBED confidence threshold -> 99UNS for review, still zero model calls."""
+    from docsort.cascade import build_centroids
+    monkeypatch.setattr(cli, "STREAM_CENTROIDS", build_centroids({"CW": "CW coursework"}))
+    monkeypatch.setattr(cli, "SUBJECT_CENTROIDS", build_centroids({"04BJT": "04BJT bjt transistor"}))
+
+    def boom(*args, **kwargs):
+        raise AssertionError("llm() must not be called for non-vision files")
+    monkeypatch.setattr(cli, "llm", boom)
+
+    f = tmp_path / "random.txt"
+    f.write_text("zzz qqq xkcd unrelated gibberish " * 3, encoding="utf-8")
+    a = argparse.Namespace(vision=False, stream_threshold=0.99, subject_threshold=0.99, backend="local", frontier="none")
+
+    st, su, ty, cf, src = cli.classify(a, "sysprompt", str(f), "random.txt", "")
+    assert su == "99UNS"
+    assert src == "embed-unsure"
+
+
+def test_classify_vision_path_still_calls_model(tmp_path, monkeypatch):
+    """Vision tier (scanned/handwritten, no extractable text) is the one exception —
+    still model-based, per the "non-vision runs only" scope of the no-model change."""
+    monkeypatch.setattr(cli, "STREAMS", {"CW"})
+    monkeypatch.setattr(cli, "SUBJECTS", {"08DIG"})
+    monkeypatch.setattr(cli, "TYPES", ["notes"])
+    calls = []
+
+    def fake_llm(a, backend, system, user_text, image_png=None):
+        calls.append(image_png is not None)
+        return "CW 08DIG notes HIGH"
+    monkeypatch.setattr(cli, "llm", fake_llm)
+    monkeypatch.setattr(cli, "page_png", lambda path, page=0, dpi=None: b"fakepng")
+    monkeypatch.setattr(cli, "doc_text", lambda path, cap=2000: "")   # no extractable text -> vision path
+
+    f = tmp_path / "scanned.pdf"
+    f.write_bytes(b"%PDF-1.4 fake")
+    a = argparse.Namespace(vision=True, stream_threshold=0.3, subject_threshold=0.45, backend="local", frontier="none")
+
+    st, su, ty, cf, src = cli.classify(a, "sysprompt", str(f), "scanned.pdf", "")
+    assert src == "vision"
+    assert su == "08DIG"
+    assert calls and calls[0] is True

@@ -40,7 +40,20 @@ DEFAULTS = {
     "options": {
         "vision": True, "apply": False,
         "min_text": 80, "deep_pages": 5, "deep_cap": 4000, "dpi": 120,
-        "embed_threshold": None,   # None = disabled; set 0.0-1.0 to enable the EMBED cascade tier
+        # Confidence cutoffs for the model-free EMBED classifier (0.0-1.0), one per axis.
+        # Non-vision files are classified by EMBED alone, no model call — below either
+        # cutoff the file is marked 99UNS for human review instead of escalating to an LLM.
+        # Separate thresholds because the two axes score on different scales: STREAM
+        # descriptions are short/generic (real scores ~0.2-0.7), SUBJECT descriptions are
+        # technical/specific (real correct-match scores usually >0.7). See docsort/cascade.py.
+        #
+        # Known limitation: for subject-vocabulary-heavy text, the STREAM score can come out
+        # *below* pure-gibberish's STREAM score — no threshold admits that content without also
+        # admitting gibberish. These defaults are a starting point, not a tuned answer; retune
+        # against your actual corpus via --report/TAG-REVIEW.md, the same workflow already used
+        # to promote ~LABEL proposals.
+        "stream_embed_threshold": 0.3,
+        "subject_embed_threshold": 0.45,
     },
 }
 
@@ -118,7 +131,8 @@ def arg_defaults(cfg):
         "api": resolve_api(cfg), "model": m["model"], "vision_model": m["vision_model"],
         "backend": m["backend"], "frontier": m["frontier"],
         "vision": bool(o.get("vision", False)), "apply": bool(o.get("apply", False)),
-        "embed_threshold": o.get("embed_threshold"),
+        "stream_threshold": o.get("stream_embed_threshold", 0.3),
+        "subject_threshold": o.get("subject_embed_threshold", 0.45),
     }
     glob = {"MIN_TEXT": o.get("min_text", 80), "DEEP_PAGES": o.get("deep_pages", 5),
             "DEEP_CAP": o.get("deep_cap", 4000), "DPI": o.get("dpi", 120)}
