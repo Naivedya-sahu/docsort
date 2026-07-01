@@ -1,3 +1,4 @@
+import contextlib
 import hashlib
 import io
 import os
@@ -44,9 +45,18 @@ def _upsert(conn, path, size, filehash, mtime, archive_depth=0, source_archive=N
     )
 
 
+def _is_own_artifact(name):
+    """docsort's own state files (_docsort_index.db, _docsort_state.jsonl, etc.) are
+    frequently placed inside the very root being scanned — they must never be indexed
+    as data, or the index (and every re-scan) grows to include its own database."""
+    return name.lower().startswith("_docsort")
+
+
 def scan_directory(conn, root):
     for dirpath, _dirnames, filenames in os.walk(root):
         for name in filenames:
+            if _is_own_artifact(name):
+                continue
             full = os.path.join(dirpath, name)
             try:
                 size = os.path.getsize(full)
@@ -140,6 +150,8 @@ def scan_root(conn, root):
     count = 0
     for dirpath, _dirnames, filenames in os.walk(root):
         for name in filenames:
+            if _is_own_artifact(name):
+                continue
             full = os.path.join(dirpath, name)
             try:
                 size = os.path.getsize(full)
@@ -156,3 +168,20 @@ def scan_root(conn, root):
                 count += (after - before)
     conn.commit()
     return count
+
+
+@contextlib.contextmanager
+def index_session(root, need_embeddings=False):
+    """Open, scan, and (optionally) embed the ground-truth index for `root`,
+    yielding the connection; closes it on exit. Consolidates the open->scan->
+    (embed)->close ceremony that was duplicated across every index-backed CLI
+    command (--scan, --clean-report, --apply-clean, --reorg-report/--apply-reorg)."""
+    db_path = os.path.join(root, "_docsort_index.db")
+    conn = open_index(db_path)
+    try:
+        scan_root(conn, root)
+        if need_embeddings:
+            embed_index(conn)
+        yield conn
+    finally:
+        conn.close()

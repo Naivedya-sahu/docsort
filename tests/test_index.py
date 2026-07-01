@@ -3,9 +3,10 @@ import sqlite3
 import subprocess
 import sys
 import zipfile
+import pytest
 from docsort.index import (
     open_index, SCHEMA, hash_file, scan_directory, scan_zip, MAX_ARCHIVE_DEPTH, scan_root,
-    set_embedding, get_embedding, embed_index,
+    set_embedding, get_embedding, embed_index, index_session,
 )
 
 
@@ -188,3 +189,47 @@ def test_embed_index_skips_already_embedded(tmp_path):
     second_pass_count = embed_index(conn)
     assert second_pass_count == 0
     conn.close()
+
+
+def test_scan_root_does_not_index_its_own_db_file(tmp_path):
+    """Real bug found via index_session: cli.py puts _docsort_index.db INSIDE the
+    scanned root for every index-backed command. scan_root must not index its own
+    database as if it were data — it would grow every re-scan since the db file's
+    own size/hash changes each time it's rewritten."""
+    root = tmp_path / "data"
+    root.mkdir()
+    (root / "a.txt").write_bytes(b"1")
+    (root / "b.txt").write_bytes(b"2")
+
+    db_path = root / "_docsort_index.db"   # deliberately inside root, matching cli.py
+    conn = open_index(str(db_path))
+    count = scan_root(conn, str(root))
+
+    assert count == 2   # not 3 — the db file itself must be excluded
+    paths = [p for (p,) in conn.execute("SELECT path FROM files").fetchall()]
+    assert not any("_docsort_index.db" in p for p in paths)
+    conn.close()
+
+
+def test_index_session_opens_scans_and_closes(tmp_path):
+    root = tmp_path / "data"
+    root.mkdir()
+    (root / "a.txt").write_bytes(b"1")
+    (root / "b.txt").write_bytes(b"2")
+
+    with index_session(str(root)) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
+        assert count == 2
+        assert get_embedding(conn, str(root / "a.txt")) is None   # no embeddings unless requested
+
+    with pytest.raises(sqlite3.ProgrammingError):
+        conn.execute("SELECT 1")   # closed on exit
+
+
+def test_index_session_embeds_when_requested(tmp_path):
+    root = tmp_path / "data"
+    root.mkdir()
+    (root / "a.txt").write_bytes(b"1")
+
+    with index_session(str(root), need_embeddings=True) as conn:
+        assert get_embedding(conn, str(root / "a.txt")) is not None
