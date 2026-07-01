@@ -47,13 +47,16 @@ DEFAULTS = {
         # descriptions are short/generic (real scores ~0.2-0.7), SUBJECT descriptions are
         # technical/specific (real correct-match scores usually >0.7). See docsort/cascade.py.
         #
-        # Known limitation: for subject-vocabulary-heavy text, the STREAM score can come out
-        # *below* pure-gibberish's STREAM score — no threshold admits that content without also
-        # admitting gibberish. These defaults are a starting point, not a tuned answer; retune
-        # against your actual corpus via --report/TAG-REVIEW.md, the same workflow already used
-        # to promote ~LABEL proposals.
-        "stream_embed_threshold": 0.3,
-        "subject_embed_threshold": 0.45,
+        # Known limitation: real testing (realistic filenames, not just long content samples)
+        # found a hard precision/recall ceiling with this stdlib embedding -- there is no single
+        # threshold pair that both accepts most real content AND rejects gibberish; the semantic
+        # separation just isn't clean enough. These values (0.2/0.3) are chosen to eliminate
+        # total-classification-failures (every file landing on a hardcoded 99UNS) at the cost of
+        # occasionally tagging noise with unwarranted confidence -- the review/promote workflow
+        # (--report/TAG-REVIEW.md) is the safety net for that, same as for ~LABEL proposals.
+        # Retune against your own corpus; these are a considered starting point, not "the" answer.
+        "stream_embed_threshold": 0.2,
+        "subject_embed_threshold": 0.3,
     },
 }
 
@@ -131,8 +134,8 @@ def arg_defaults(cfg):
         "api": resolve_api(cfg), "model": m["model"], "vision_model": m["vision_model"],
         "backend": m["backend"], "frontier": m["frontier"],
         "vision": bool(o.get("vision", False)), "apply": bool(o.get("apply", False)),
-        "stream_threshold": o.get("stream_embed_threshold", 0.3),
-        "subject_threshold": o.get("subject_embed_threshold", 0.45),
+        "stream_threshold": o.get("stream_embed_threshold", 0.2),
+        "subject_threshold": o.get("subject_embed_threshold", 0.3),
     }
     glob = {"MIN_TEXT": o.get("min_text", 80), "DEEP_PAGES": o.get("deep_pages", 5),
             "DEEP_CAP": o.get("deep_cap", 4000), "DPI": o.get("dpi", 120)}

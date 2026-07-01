@@ -58,7 +58,7 @@ Console commands: **`docsort`** (CLI) and **`docsort-gui`** (GUI).
 **Dev loop (this machine):**
 - Editable interpreter: `.venv\Scripts\python.exe` (has pymupdf, flet 0.85.3, pytest, pyinstaller;
   does NOT have sentence-transformers/torch — the `recon` extra was never installed here, see §9).
-- Tests: `.venv\Scripts\python.exe -m pytest -q` — **74 tests**, all pure-logic/hermetic. No
+- Tests: `.venv\Scripts\python.exe -m pytest -q` — **76 tests**, all pure-logic/hermetic. No
   model/network needed anywhere, including recon's tests (they exercise the real stdlib-fallback
   path, since sentence-transformers genuinely isn't installed in this environment).
 - **Build exes locally:** `build-exe.bat` (repo root) — GUI via `flet pack`, CLI via PyInstaller, version
@@ -145,7 +145,7 @@ docsort/
   recon.py           # (unreleased) name-only, whole-tree, zero-model triage — NameEmbedder + recon_scan()
   data/              # bundled templates (TAGS.md, system_prompt.md, config.example.json)
 tests/  — test_core.py test_runcore.py test_index.py test_dedup.py test_vendor.py test_clean.py
-          test_reorg.py test_embed.py test_cascade.py test_tree.py test_recon.py  (74 tests total)
+          test_reorg.py test_embed.py test_cascade.py test_tree.py test_recon.py  (76 tests total)
 run_gui.py, run_cli.py             # PyInstaller/flet-pack entry points (repo root)
 build-exe.bat                      # local exe build
 .github/workflows/ci.yml, release.yml
@@ -159,9 +159,13 @@ ROOT (only):  README.md  LICENSE  pyproject.toml  MANIFEST.in  requirements.txt 
 ### Classification tiers (`classify()`), trust high→low
 **`EMBED`** (model-free, default for every non-vision file) → **`VISION`** (model, only when there's
 no extractable text at all; still `99UNS`? page-3, `vision3`). EMBED gates on **two independent
-confidence thresholds** (`--stream-threshold`/`--subject-threshold`, config defaults 0.3/0.45) — real
-testing found STREAM and SUBJECT scores don't move together (a shared threshold systematically
-rejected one axis; see GUIDE.md §7 for the evidence). Below either → `99UNS`, **never escalated to a
+confidence thresholds** (`--stream-threshold`/`--subject-threshold`, config defaults **0.2/0.3** as of
+the post-v0.13.0 recalibration) — real testing found STREAM and SUBJECT scores don't move together
+(a shared threshold systematically rejected one axis), AND found a hard precision/recall ceiling with
+the stdlib embedding (no threshold pair both accepts real content and rejects gibberish cleanly — see
+GUIDE.md §7 for the evidence). **Per-axis, not joint:** a confident answer on one axis is kept even if
+the other misses (`source=embed-partial`) — a real bug (everything silently falling back to a
+hardcoded `CW-99UNS`) was found and fixed this way. Both miss → `99UNS`, **never escalated to a
 model**. `TEXT`/`ESCALATE`/`FRONTIER` (the pre-v0.13.0 model-calling tiers for non-vision files) no
 longer exist on that path — `--frontier` is still a valid flag and `llm()`'s `claude`/`cmd` backends
 still work, but nothing in `classify()` calls them anymore (vision path never did either). This is a
@@ -246,7 +250,7 @@ tab). No v0.13.0 feature is reachable from the GUI.
 | 0.12.1 | GUI hotfixes — no console window, Run/Apply-audited work in the packaged exe. |
 | 0.12.3 | GUI nav rail 5→3 tabs (Folders/Reports folded into Stats); `99UNS` defaults flipped. |
 | **0.13.0** | **Drive-organizer backend** — ground-truth index (archive-aware), Clean (3-layer dedup + vendor-dump), EMBED cascade tier (replaces TEXT/ESCALATE/FRONTIER for non-vision files), Reorg (thin-chain flatten). Released, tagged, exes published. |
-| *(unreleased, on `main`)* | Architecture fixes: `DirectoryTree` (2 real bugs fixed), `index_session()` consolidation (1 real bug fixed — index self-scanning its own db). New **Recon** feature (`recon.py`, `--recon-report`, optional GPU embedder via `[recon]` extra). `--version` + GUI title version display added; `pyproject.toml`'s version (was stuck on `0.12.3`) synced to `__init__.py`'s. `run.bat`'s GUI branch fixed (pythonw + start, no longer console-attached for the whole session). **Real bug found by the user testing the built exe:** `main()`'s pre-flight model-server check hard-aborted every run when LM Studio wasn't reachable, even though EMBED-tier classification needs no model — contradicted the entire point of the EMBED-only redesign. Fixed: scoped to `vision`-only, degrades gracefully instead of aborting. |
+| *(unreleased, on `main`)* | Architecture fixes: `DirectoryTree` (2 real bugs fixed), `index_session()` consolidation (1 real bug fixed — index self-scanning its own db). New **Recon** feature (`recon.py`, `--recon-report`, optional GPU embedder via `[recon]` extra). `--version` + GUI title version display added; `pyproject.toml`'s version (was stuck on `0.12.3`) synced to `__init__.py`'s. `run.bat`'s GUI branch fixed (pythonw + start, no longer console-attached for the whole session). **Real bug found by the user testing the built exe:** `main()`'s pre-flight model-server check hard-aborted every run when LM Studio wasn't reachable, even though EMBED-tier classification needs no model — contradicted the entire point of the EMBED-only redesign. Fixed: scoped to `vision`-only, degrades gracefully instead of aborting. **Real bug found by the user running a real corpus:** `classify_by_embed()` silently discarded a confident axis whenever the other missed its threshold, defaulting everything to `CW-99UNS` ("almost all files skipped"). Fixed: per-axis confidence, never all-or-nothing (`source=embed-partial`); default thresholds recalibrated `0.3/0.45 → 0.2/0.3` after evidence showed a hard precision/recall ceiling, not just a bad number. |
 
 Git: `main` pushed to origin, tree clean, well past the v0.13.0 tag. **Not yet tagged as v0.14.0** —
 no release instruction given for the post-v0.13.0 work yet. See §2's Release checklist when ready.
@@ -315,10 +319,18 @@ Taxonomy Generator; (3) effectively Windows-only; (4) unsigned exe (SmartScreen)
 - **`DirectoryTree.from_index(conn, root)` requires `root`, always** — there is no unscoped directory
   enumeration left in the codebase (`index.list_directories()` was deleted after migration); don't
   reintroduce one.
-- **EMBED thresholds are a starting point, not tuned** — real testing found the stdlib embedding's
-  STREAM-axis signal is often weaker than pure gibberish for subject-vocabulary-heavy text; no
-  threshold value fully solves this without also enriching the STREAM centroid seed text (not done).
-  Expect real-world runs to need threshold retuning via `--report`.
+- **EMBED thresholds (0.2/0.3) are a considered starting point, not a solved problem** — real testing
+  found a hard precision/recall ceiling with the stdlib embedding: no single threshold pair both
+  accepts most real content and rejects gibberish. Current defaults favor eliminating total-failure
+  cases over avoiding occasional false-positive confidence; the review/promote workflow is the
+  accepted safety net for that tradeoff. If a corpus still performs poorly after retuning, the real
+  fix is extending `classify()`'s EMBED tier to (optionally) use the same real GPU-capable embedder
+  already built for `--recon-report` (`recon.NameEmbedder`) instead of the stdlib hashing-trick —
+  discussed, deliberately deferred until proven necessary, not yet attempted.
+- **`classify_by_embed()`'s contract is per-axis confidence, not all-or-nothing** — always returns
+  `(stream, subject, stream_score, subject_score, stream_confident, subject_confident)`, never `None`.
+  Callers must not collapse this back into "both or nothing" — that exact regression (a confident
+  STREAM guess silently discarded whenever SUBJECT alone missed its bar) was a real bug in production.
 - **Flet 0.85.3 API differs from older docs** — use `ft.run` (not `ft.app`), `ft.Icons`/`ft.Colors`
   (uppercase), **FilePicker is a Service → `page.services`**. Introspect the installed package.
 - **Editable install + PyInstaller:** docsort is `pip install -e .` in the dev `.venv`, so PyInstaller
@@ -342,11 +354,13 @@ Taxonomy Generator; (3) effectively Windows-only; (4) unsigned exe (SmartScreen)
   flags/features → minor bump, pure fixes → patch. Docs-only changes commit directly to `main`, no
   feature branch (matches the v0.10.2 precedent).
 - **Real bugs found during refactors get fixed and documented as findings, not silently absorbed** —
-  4 were found and fixed this cycle: index self-scanning its own db; two DirectoryTree-migration
-  scoping bugs (all via test-first discipline, not inspection alone); and one found by the user
-  testing the actual built exe (`main()`'s model-preflight check aborting every EMBED-only run) —
-  a reminder that automated tests don't replace a human running the real thing (see the Release
-  checklist's mandatory smoke-test step, §2).
+  5 were found and fixed this cycle: index self-scanning its own db; two DirectoryTree-migration
+  scoping bugs (all via test-first discipline, not inspection alone); one found by the user testing
+  the actual built exe (`main()`'s model-preflight check aborting every EMBED-only run); and one
+  found by the user running a real corpus (`classify_by_embed()` silently discarding a confident
+  STREAM guess whenever SUBJECT alone missed its threshold, defaulting everything to `CW-99UNS`).
+  Two of five were only caught by a human running the real thing — automated tests don't replace
+  that (see the Release checklist's mandatory smoke-test step, §2).
 
 ---
 

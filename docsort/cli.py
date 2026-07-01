@@ -244,17 +244,20 @@ def classify(a,sysp,full,fn,rel):
             if r[1]!="99UNS": return (*r,"vision3")
         return st,su,ty,cf,src
     from docsort.cascade import classify_by_embed
-    r=classify_by_embed(f"{fn} {rel} {snip}",STREAM_CENTROIDS,SUBJECT_CENTROIDS,a.stream_threshold,a.subject_threshold)
-    if r is not None:
-        st,su,_,_=r
-        return st,su,"misc","high","embed"
-    if ispdf:                                       # try harder before giving up — still no model call
+    st,su,_,_,s_ok,su_ok=classify_by_embed(
+        f"{fn} {rel} {snip}",STREAM_CENTROIDS,SUBJECT_CENTROIDS,a.stream_threshold,a.subject_threshold)
+    src="embed"
+    if not (s_ok and su_ok) and ispdf:               # try harder before settling — still no model call
         deep=pdf_text(full,DEEP_PAGES,DEEP_CAP)
         if len(deep)>len(snip):
-            r=classify_by_embed(f"{fn} {rel} {deep}",STREAM_CENTROIDS,SUBJECT_CENTROIDS,a.stream_threshold,a.subject_threshold)
-            if r is not None:
-                st,su,_,_=r
-                return st,su,"misc","high","embed5"
+            st2,su2,_,_,s_ok2,su_ok2=classify_by_embed(
+                f"{fn} {rel} {deep}",STREAM_CENTROIDS,SUBJECT_CENTROIDS,a.stream_threshold,a.subject_threshold)
+            if (s_ok2,su_ok2).count(True)>=(s_ok,su_ok).count(True):   # deep read isn't worse
+                st,su,s_ok,su_ok=st2,su2,s_ok2,su_ok2; src="embed5"
+    if s_ok and su_ok: return st,su,"misc","high",src
+    if s_ok or su_ok:                                # a real, confident answer on one axis —
+                                                      # never discard it just because the other missed
+        return (st if s_ok else "CW"),(su if su_ok else "99UNS"),"misc","low",src+"-partial"
     return "CW","99UNS","misc","low","embed-unsure"
 
 def move_by_prefix(root,dest,apply):
@@ -502,10 +505,10 @@ def add_args(ap):
                          "before Scan/Clean/Classify touch anything; then exit")
     ap.add_argument("--stream-threshold",dest="stream_threshold",type=float,default=None,
                     help="STREAM-axis confidence cutoff (0.0-1.0) for the model-free EMBED classifier "
-                         "used on all non-vision files (default from config, currently 0.3)")
+                         "used on all non-vision files (default from config, currently 0.2)")
     ap.add_argument("--subject-threshold",dest="subject_threshold",type=float,default=None,
                     help="SUBJECT-axis confidence cutoff (0.0-1.0) for the model-free EMBED classifier "
-                         "used on all non-vision files (default from config, currently 0.45)")
+                         "used on all non-vision files (default from config, currently 0.3)")
     ap.add_argument("--apply-journal",dest="apply_journal",action="store_true",
                     help="apply a prior dry-run's audited decisions from the journal (rename/move only, no model calls)")
     ap.add_argument("--stats",action="store_true",help="print lifetime stats from the global index, then exit")
