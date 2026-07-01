@@ -1,8 +1,8 @@
 # docsort — Session Handoff & Project State
 
-> Single-file, self-contained handoff for the next session. Date: **2026-06-30**.
-> Current version: **v0.12.0** (released — `v0.12.0` tag pushed; GitHub release published with
-> `docsort-gui.exe` + `docsort.exe`).
+> Single-file, self-contained handoff for the next session. Date: **2026-07-01**.
+> Current version: **v0.12.3** (GUI tab consolidation — see CHANGELOG; tag/release this once the
+> human visual smoke-test in §9 has passed).
 > Repo: https://github.com/Naivedya-sahu/docsort · Local: `D:\Vault\Personal\Archive\Doc-handler`
 > (working folder still named `Doc-handler` — intentional; nothing depends on it.)
 
@@ -20,7 +20,8 @@ An optional **Claude `haiku` frontier** (uses the user's Claude subscription, no
 genuinely-ambiguous files. No OpenAI/ChatGPT backend (removed deliberately).
 
 Two surfaces: **CLI** (`docsort`) and a **modern Flet GUI** (`docsort-gui`) — as of v0.11.0 a Flet
-(Python/Flutter) app, Discord-like dark, nav rail: Run / Tags / Folders / Reports / Stats.
+(Python/Flutter) app, Discord-like dark, nav rail: Run / Tags / Stats (Folders + Reports live inside
+Stats as sub-sections since v0.12.3; the 5 run-option toggles live on the Tags tab).
 
 ---
 
@@ -128,10 +129,12 @@ plus the existing set: `--apply --copy --misc/--no-misc --skip-unknown --vision 
 journal-recorded renames/moves; `--skip-unknown` leaves `99UNS` untouched. **`--apply-journal` writes fresh
 journal rows so `--undo` still reverses it.**
 
-**GUI (Flet):** folder picker, host + live model picker (+ refresh), toggles (copy/misc/vision/apply/
-skip-unknown), frontier dropdown, **Run / Apply audited / Stop**, progress hero (% · file i/N · elapsed ·
-ETA), counters (done/skipped/failed/tok-s), live per-file feed (tier + `[STREAM-SUBJECT]` tag), **verbose
-collapsible log**, Tags editor, Folders (exclude/include) dialog, Reports viewer, Stats (lifetime).
+**GUI (Flet):** folder picker, host + live model picker (+ refresh), frontier dropdown,
+**Run / Apply audited / Stop**, progress hero (% · file i/N · elapsed · ETA), counters
+(done/skipped/failed/tok-s), live per-file feed (tier + `[STREAM-SUBJECT]` tag), **verbose
+collapsible log** — all on Run. Tags tab: tag-vocabulary editor + the 5 run-option toggles
+(vision/apply/copy/misc/skip-unknown — skip-unknown defaults **on**, misc defaults **off** as of
+v0.12.3). Stats tab: lifetime counts + embedded Folders (exclude/include) + embedded Reports viewer.
 
 ---
 

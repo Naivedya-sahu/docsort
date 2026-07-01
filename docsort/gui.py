@@ -41,7 +41,7 @@ OK     = "#3ddc84"
 FAIL   = "#e0715e"
 
 # Nav section names (index matches NavigationRail selected_index)
-_SECTION_NAMES = ["Run", "Tags", "Folders", "Reports", "Stats"]
+_SECTION_NAMES = ["Run", "Tags", "Stats"]
 
 
 # ---------------------------------------------------------------------------
@@ -84,8 +84,38 @@ def _metric(label: str, value_ctrl: "ft.Text") -> "ft.Container":
     )
 
 
-def _run_view(page: "ft.Page") -> "ft.Control":
-    """Build the Run view: controls, progress hero, counters, live feed."""
+def _build_toggles() -> dict:
+    """The 5 run-option switches, built once and shared between the Run view
+    (reads .value to build CLI opts) and the Tags view (renders them) so a
+    toggle flipped in Tags affects the very next Run."""
+    return {
+        "vision": ft.Switch(label="Vision", value=False),
+        "apply": ft.Switch(label="Apply (rename)", value=False),
+        "copy": ft.Switch(label="Work on a copy", value=False),
+        "misc": ft.Switch(label="Move 99UNS → misc", value=False),
+        "skip": ft.Switch(label="Skip unknown", value=True),
+    }
+
+
+def _build_opts(host: "ft.TextField", model: "ft.Dropdown", toggles: dict, frontier: "ft.Dropdown") -> dict:
+    """Assemble the docsort CLI opts dict from the Run/Tags controls."""
+    return {
+        "host": host.value.strip(),
+        "model": model.value,
+        "vision": toggles["vision"].value,
+        "apply": toggles["apply"].value,
+        "copy": toggles["copy"].value,
+        "misc": toggles["misc"].value,
+        "skip_unknown": toggles["skip"].value,
+        "frontier": frontier.value,
+    }
+
+
+def _run_view(page: "ft.Page", toggles: dict) -> "ft.Control":
+    """Build the Run view: controls, progress hero, counters, live feed.
+
+    `toggles` is the shared dict from `_build_toggles()` — same objects the
+    Tags view renders, so this just reads `.value` off them."""
     streams, subjects, _types = load_tags(config.tags_path())
     cfg = config.load_config()
 
@@ -111,11 +141,11 @@ def _run_view(page: "ft.Page") -> "ft.Control":
     frontier = ft.Dropdown(label="Frontier", width=160, value="none",
                            options=[ft.dropdown.Option(key="none", text="none"),
                                     ft.dropdown.Option(key="claude", text="claude")])
-    t_vision = ft.Switch(label="Vision", value=False)
-    t_apply = ft.Switch(label="Apply (rename)", value=False)
-    t_copy = ft.Switch(label="Work on a copy", value=False)
-    t_misc = ft.Switch(label="Move 99UNS → misc", value=True)
-    t_skip = ft.Switch(label="Skip unknown", value=False)
+    t_vision = toggles["vision"]
+    t_apply = toggles["apply"]
+    t_copy = toggles["copy"]
+    t_misc = toggles["misc"]
+    t_skip = toggles["skip"]
 
     # ---- progress hero ----
     pct = ft.Text("0%", size=42, weight=ft.FontWeight.W_500, color=FG)
@@ -224,9 +254,7 @@ def _run_view(page: "ft.Page") -> "ft.Control":
             status.color = FAIL
             page.update()
             return
-        opts = {"host": host.value.strip(), "model": model.value, "vision": t_vision.value,
-                "apply": t_apply.value, "copy": t_copy.value, "misc": t_misc.value,
-                "skip_unknown": t_skip.value, "frontier": frontier.value}
+        opts = _build_opts(host, model, toggles, frontier)
         cmd = build_run_cmd(opts, python=sys.executable, folder=f)
         feed.controls.clear()
         log.controls.clear()
@@ -311,7 +339,6 @@ def _run_view(page: "ft.Page") -> "ft.Control":
         [
             ft.Row([folder, browse]),
             ft.Row([host, model, refresh, frontier], wrap=True, vertical_alignment=ft.CrossAxisAlignment.END),
-            ft.Row([t_vision, t_apply, t_copy, t_misc, t_skip], wrap=True),
             ft.Row([run_btn, apply_btn, stop_btn, status]),
         ],
         spacing=10,
@@ -342,7 +369,7 @@ def _run_view(page: "ft.Page") -> "ft.Control":
 # Tags view (structured editor over tagsio)
 # ---------------------------------------------------------------------------
 
-def _tags_view(page: "ft.Page") -> "ft.Control":
+def _tags_view(page: "ft.Page", toggles: dict) -> "ft.Control":
     path = config.tags_path()
     text = open(path, encoding="utf-8").read()
     palette = {"STREAMS": ACCENT, "SUBJECTS": "#5b8cff", "TYPES": OK}
@@ -397,9 +424,15 @@ def _tags_view(page: "ft.Page") -> "ft.Control":
             status.value, status.color = f"save failed: {e}", FAIL
         page.update()
 
+    toggle_row = ft.Row(
+        [toggles["vision"], toggles["apply"], toggles["copy"], toggles["misc"], toggles["skip"]],
+        wrap=True,
+    )
     return ft.Column(
         [ft.Text("First token on each line = the code.", color=MUTED, size=12),
          col_row,
+         ft.Text("Run options", color=MUTED, size=12),
+         toggle_row,
          ft.Row([ft.FilledButton("Save", on_click=save, style=ft.ButtonStyle(bgcolor=ACCENT)), status])],
         spacing=12, expand=True)
 
@@ -499,7 +532,7 @@ def _reports_view(page: "ft.Page", folder_getter) -> "ft.Control":
         spacing=12, expand=True)
 
 
-def _stats_view(page: "ft.Page") -> "ft.Control":
+def _stats_view(page: "ft.Page", folder_getter) -> "ft.Control":
     import json
     import collections
     idx = os.path.join(config.user_dir(), "index.jsonl")
@@ -517,8 +550,13 @@ def _stats_view(page: "ft.Page") -> "ft.Control":
         for k, c in agg.most_common(20):
             lines.controls.append(ft.Text(f"{k}  ×{c}", color=MUTED, size=13, font_family="Consolas"))
 
-    return ft.Column([ft.Text("Lifetime stats", color=MUTED, size=12), lines],
-                     spacing=12, expand=True)
+    return ft.Column(
+        [ft.Text("Lifetime stats", color=MUTED, size=12), lines,
+         ft.Divider(color=PANEL2),
+         ft.Text("Folders", color=MUTED, size=12), _folders_view(page),
+         ft.Divider(color=PANEL2),
+         ft.Text("Reports", color=MUTED, size=12), _reports_view(page, folder_getter)],
+        spacing=12, expand=True, scroll=ft.ScrollMode.AUTO)
 
 
 # ---------------------------------------------------------------------------
@@ -538,8 +576,12 @@ def _build(page: "ft.Page") -> None:
     page.window.min_width = 720
     page.window.min_height = 560
 
+    # Run-option switches, built once and shared between Run (reads .value)
+    # and Tags (renders them) so toggling in Tags affects the next Run.
+    toggles = _build_toggles()
+
     # Build the Run view once; other views are built lazily on first visit.
-    run_view = _run_view(page)
+    run_view = _run_view(page, toggles)
     content = ft.Container(expand=True, padding=18, content=run_view)
     cache: dict = {0: run_view}
 
@@ -549,13 +591,9 @@ def _build(page: "ft.Page") -> None:
 
     def _make_view(idx: int) -> "ft.Control":
         if idx == 1:
-            return _tags_view(page)
+            return _tags_view(page, toggles)
         if idx == 2:
-            return _folders_view(page)
-        if idx == 3:
-            return _reports_view(page, _folder_value)
-        if idx == 4:
-            return _stats_view(page)
+            return _stats_view(page, _folder_value)
         return run_view
 
     def _on_nav_change(e: "ft.ControlEvent") -> None:
@@ -574,8 +612,6 @@ def _build(page: "ft.Page") -> None:
         destinations=[
             ft.NavigationRailDestination(icon=ft.Icons.PLAY_ARROW, label="Run"),
             ft.NavigationRailDestination(icon=ft.Icons.LABEL, label="Tags"),
-            ft.NavigationRailDestination(icon=ft.Icons.FOLDER_OPEN, label="Folders"),
-            ft.NavigationRailDestination(icon=ft.Icons.DESCRIPTION, label="Reports"),
             ft.NavigationRailDestination(icon=ft.Icons.BAR_CHART, label="Stats"),
         ],
         on_change=_on_nav_change,

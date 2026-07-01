@@ -2,6 +2,16 @@
 
 All notable changes. Newest on top.
 
+## [0.12.3] — 2026-07-01
+### Changed
+- **GUI nav rail: 5 tabs → 3** (Run / Tags / Stats). Folders and Reports are no longer standalone
+  tabs — their content now renders as sub-sections inside Stats.
+- **Run-option toggles moved from Run to Tags.** Vision / Apply(rename) / Work-on-a-copy / Misc→ /
+  Skip-unknown now render on the Tags tab, below the tag-vocabulary editor. Run keeps just the
+  folder picker, host/model/frontier, and the Run/Apply-audited/Stop buttons.
+- **`99UNS` (unknown) defaults flipped.** Skip-unknown now defaults **on** (unsure files are left
+  untouched by default); Misc-quarantine now defaults **off** (opt-in). Previously the reverse.
+
 ## [0.12.1] — 2026-06-30
 ### Fixed
 - **No background console window.** The pip `docsort-gui` entry is now a `gui-scripts`

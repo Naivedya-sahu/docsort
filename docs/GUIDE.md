@@ -42,9 +42,10 @@ Trust order: `text > text5 > vision > vision3 > frontier > filename` (the `sourc
                  docsort --location academics --move @archive --apply
 6. SPECIAL       handle <archive>/{GATE,PROJ,RES,REC} folders separately
 ```
-GUI equivalent: `docsort-gui` — a Flet app with a nav rail (Run / Tags / Folders / Reports / Stats),
-the same toggles, live progress + per-file feed + verbose log, and an **Apply audited** button that runs
-`--apply-journal` (rename the reviewed dry-run results without re-classifying).
+GUI equivalent: `docsort-gui` — a Flet app with a nav rail (Run / Tags / Stats — Folders and Reports
+live inside Stats as of v0.12.3, the run-option toggles live on Tags), live progress + per-file feed
++ verbose log, and an **Apply audited** button that runs `--apply-journal` (rename the reviewed
+dry-run results without re-classifying).
 
 ## 5. Flags
 | Flag | Purpose |
