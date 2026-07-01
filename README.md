@@ -5,14 +5,20 @@
 ![offline](https://img.shields.io/badge/local%20pass-100%25%20offline-orange)
 ![ui](https://img.shields.io/badge/UI-CLI%20%2B%20Flet%20GUI-7c5cff)
 
-Local-LLM document tagger + sorter. Reads each academic document, classifies it into
-a **STREAM** (CW / GATE / PROJ / RES / REC / REF) and a **SUBJECT** (your EE topic list),
-stamps a `[STREAM-SUBJECT]` filename prefix, then moves files into a clean tree.
+Local-first document tagger, sorter, and drive organizer. Reads each academic document,
+classifies it into a **STREAM** (CW / GATE / PROJ / RES / REC / REF) and a **SUBJECT** (your EE
+topic list), stamps a `[STREAM-SUBJECT]` filename prefix, then moves files into a clean tree.
 
-The whole classification pass runs **locally and free** against [LM Studio](https://lmstudio.ai).
-A frontier model (Claude Code, on your subscription) is an **optional** fallback for the few
-genuinely-ambiguous files. Ships with both a **CLI** (`docsort`) and a **modern dark Flet GUI**
-(`docsort-gui`) — a nav rail with Run / Tags / Folders / Reports / Stats.
+**As of v0.13.0, classification is model-free for the vast majority of files.** A cheap embedding
+match against your own `TAGS.md` vocabulary tags anything with extractable text — zero LLM calls,
+instant. [LM Studio](https://lmstudio.ai) only gets involved for **VISION-tier** files (scanned/
+handwritten pages with no extractable text). A frontier model (Claude Code, on your subscription)
+is an optional fallback for hard VISION cases. Ships with both a **CLI** (`docsort`) and a
+**modern dark Flet GUI** (`docsort-gui`) — a nav rail with Run / Tags / Stats.
+
+Also handles the messier problem behind tagging: v0.13.0 adds a **drive-organizer** layer —
+duplicate detection (exact-hash, whole-duplicated-folder, near-duplicate), vendor-dump detection,
+thin-folder-chain flattening, and a name-only zero-model triage pass. See `docs/GUIDE.md` §2.5.
 
 ---
 
@@ -167,13 +173,18 @@ driven programmatically.
 
 ## How it classifies (tiers)
 
-`TEXT (2 pages)` → `ESCALATE (5 pages on 99UNS)` → `VISION (render page, +page 3)` →
-`FRONTIER (claude, optional)` → `FILENAME (last resort)`. The `source` column in the run log
-tells you which tier decided each file. See **GUIDE.md** for the full runbook.
+`EMBED (model-free, default)` → `VISION (model, only when there's no extractable text)`. EMBED
+matches a cheap embedding of filename+folder+extracted text against zero-shot centroids built
+from your own `TAGS.md` descriptions — two independent confidence cutoffs (STREAM, SUBJECT), below
+either → `99UNS` for review, never escalated to a model. VISION is the one exception (scanned/
+handwritten pages) and still calls LM Studio. The `source` column in the run log tells you which
+tier decided each file (`embed` / `embed5` / `vision` / `vision3`). See **GUIDE.md** for the full
+runbook, including the drive-organizer features (Scan/Clean/Reorg/Recon).
 
 ## Pipeline position
 `dupeGuru hashed-dedup` → **docsort tag** → **docsort move** → handle GATE/PROJ/RES folders apart.
-Run dedup FIRST so the model never reads duplicate copies.
+Run dedup FIRST so duplicate copies never get tagged twice. docsort's own built-in Clean phase
+(`--clean-report`/`--apply-clean`) can do this step in-app instead of dupeGuru — see GUIDE.md §2.5.
 
 ## Files
 | Path | What |
@@ -183,6 +194,15 @@ Run dedup FIRST so the model never reads duplicate copies.
 | `docsort/runcore.py` | UI-agnostic run core — `PROGRESS`/row parsing, command builder, threaded `RunController` |
 | `docsort/tagsio.py` | `TAGS.md` block read/rewrite (used by the GUI tag editor) |
 | `docsort/config.py` | config + per-user file resolution |
+| `docsort/index.py` | ground-truth SQLite index — archive-aware scan (nested zips), `index_session()` |
+| `docsort/tree.py` | `DirectoryTree` — path-tree traversal shared by dedup/reorg/vendor |
+| `docsort/embed.py` | stdlib hashing-trick embeddings + cosine similarity (no ML dependency) |
+| `docsort/cascade.py` | zero-shot centroid classification, seeded from `TAGS.md` descriptions |
+| `docsort/dedup.py` | exact-hash, duplicate-subtree, and near-duplicate detection |
+| `docsort/vendor.py` | vendor-dump (GitHub `-master`/`-main`) heuristic detector |
+| `docsort/clean.py` | combines the dedup/vendor detectors into one report + quarantine-apply |
+| `docsort/reorg.py` | thin single-child-folder-chain detection + flatten proposals |
+| `docsort/recon.py` | name-only, whole-tree, zero-model triage pass (optional GPU embedder) |
 | `docsort/data/` | bundled templates: `TAGS.md`, `system_prompt.md`, `config.example.json` |
 | `run.bat` | cmd/PowerShell launcher (uses repo `.venv`) |
 | `docs/GUIDE.md` | detailed runbook — tiers, escalation, backends, flags |
