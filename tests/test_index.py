@@ -5,7 +5,7 @@ import sys
 import zipfile
 from docsort.index import (
     open_index, SCHEMA, hash_file, scan_directory, scan_zip, MAX_ARCHIVE_DEPTH, scan_root,
-    list_directories,
+    list_directories, set_embedding, get_embedding,
 )
 
 
@@ -16,7 +16,7 @@ def test_open_index_creates_files_table(tmp_path):
     assert cur.fetchone() is not None
     cols = {row[1] for row in conn.execute("PRAGMA table_info(files)")}
     assert cols == {
-        "path", "size", "hash", "mtime", "archive_depth", "source_archive"
+        "path", "size", "hash", "mtime", "archive_depth", "source_archive", "embedding"
     }
     conn.close()
 
@@ -153,4 +153,21 @@ def test_list_directories_derives_from_file_paths(tmp_path):
     dirs = list_directories(conn)
     assert str(data_root) in dirs
     assert str(data_root / "sub") in dirs
+    conn.close()
+
+
+def test_set_and_get_embedding_roundtrip(tmp_path):
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    (data_root / "a.txt").write_bytes(b"content")
+
+    db_path = tmp_path / "index.db"
+    conn = open_index(str(db_path))
+    scan_directory(conn, str(data_root))
+
+    path = str(data_root / "a.txt")
+    vec = (0.1, 0.2, 0.3)
+    set_embedding(conn, path, vec)
+    result = get_embedding(conn, path)
+    assert result == vec
     conn.close()

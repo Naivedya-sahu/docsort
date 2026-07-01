@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS files (
     hash TEXT,
     mtime REAL,
     archive_depth INTEGER DEFAULT 0,
-    source_archive TEXT
+    source_archive TEXT,
+    embedding TEXT
 );
 """
 
@@ -96,6 +97,21 @@ def scan_zip(conn, zip_source, virtual_prefix, depth, budget):
         pass
     conn.commit()
     return budget
+
+
+def set_embedding(conn, path, vector):
+    conn.execute(
+        "UPDATE files SET embedding=? WHERE path=?",
+        (",".join(str(x) for x in vector), path),
+    )
+    conn.commit()
+
+
+def get_embedding(conn, path):
+    row = conn.execute("SELECT embedding FROM files WHERE path=?", (path,)).fetchone()
+    if row is None or row[0] is None:
+        return None
+    return tuple(float(x) for x in row[0].split(","))
 
 
 def list_directories(conn):
